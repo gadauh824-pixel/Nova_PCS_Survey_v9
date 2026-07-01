@@ -2439,24 +2439,15 @@ function setPhoto(blob, w, h){
 async function processGalleryFile(file){
   const img = new Image();
   img.onload = ()=>{
-    // Full native resolution, landscape orientation (matches Word report layout)
+    // Full native resolution — no rotation, use photo exactly as captured
     const W = img.naturalWidth, H = img.naturalHeight;
-    const outW = W >= H ? W : H;
-    const outH = W >= H ? H : W;
     const c = document.createElement('canvas');
-    c.width = outW; c.height = outH;
+    c.width = W; c.height = H;
     const ctx = c.getContext('2d');
-    if(W < H){
-      ctx.translate(outW/2, outH/2);
-      ctx.rotate(Math.PI/2);
-      ctx.drawImage(img, -H/2, -W/2, H, W);
-      ctx.setTransform(1,0,0,1,0,0);
-    } else {
-      ctx.drawImage(img, 0, 0, outW, outH);
-    }
+    ctx.drawImage(img, 0, 0, W, H);
     const stampDate = file.lastModified ? new Date(file.lastModified) : new Date();
-    stampDateTime(ctx, outW, outH, stampDate);
-    c.toBlob(blob=>setPhoto(blob,outW,outH),'image/jpeg',0.98);
+    stampDateTime(ctx, W, H, stampDate);
+    c.toBlob(blob=>setPhoto(blob,W,H),'image/jpeg',0.98);
   };
   img.src = URL.createObjectURL(file);
 }
