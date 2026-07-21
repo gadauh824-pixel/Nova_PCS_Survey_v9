@@ -1270,28 +1270,36 @@ window.addEventListener('load', ()=>{ initFirebase(); });
   logoutB.addEventListener('click', handleLogout);
 
   // Google Sign-In uses GSI (works in iPhone PWA, Android PWA, desktop)
-  async function handleGoogleSignIn(){
+  function handleGoogleSignIn(){
     signBtn.disabled = true;
     signBtn.innerHTML = '⏳ Signing in...';
     showMsg('Opening Google Sign-In...','info');
-    // Always use Firebase popup — most reliable across all platforms
-    await firebaseGoogleSignIn();
-  }
-
-  async function firebaseGoogleSignIn(){
-    if(!initFirebase()){
-      showMsg('Sign-In unavailable. Check internet connection.','error');
+    if(typeof google === 'undefined' || !google.accounts){
+      showMsg('Google Sign-In unavailable. Check internet connection.','error');
       signBtn.disabled = false;
       signBtn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:22px;height:22px"> Sign in with Google';
       return;
     }
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGSICredential,
+      auto_select: false,
+      cancel_on_tap_outside: true,
+    });
+    google.accounts.id.prompt((notification)=>{
+      if(notification.isNotDisplayed() || notification.isSkippedMoment()){
+        google.accounts.id.renderButton(signBtn, {theme:'outline',size:'large',width:280});
+        signBtn.disabled = false;
+      }
+    });
+  }
+
+  // Dummy firebaseGoogleSignIn kept for Android PWA redirect result handling
+  async function firebaseGoogleSignIn(){
+    if(!initFirebase()) return;
     try{
       const provider = new firebase.auth.GoogleAuthProvider();
       provider.setCustomParameters({prompt:'select_account'});
-      const isAndroidPWA = window.matchMedia('(display-mode: standalone)').matches && !window.navigator.standalone;
-      if(isAndroidPWA){
-        await _fbAuth.signInWithRedirect(provider); return;
-      }
       const result = await _fbAuth.signInWithPopup(provider);
       const user = result.user;
       const email = (user.email||'').toLowerCase();
