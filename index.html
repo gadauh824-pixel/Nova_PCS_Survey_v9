@@ -1204,12 +1204,19 @@ let _fbAuth = null;
 function initFirebase(){
   if(_fbApp) return true;
   try{
-    if(typeof firebase === 'undefined') return false;
-    _fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
+    if(typeof firebase === 'undefined'){ console.warn('Firebase SDK not loaded'); return false; }
+    if(firebase.apps && firebase.apps.length > 0){
+      _fbApp  = firebase.apps[0];
+    } else {
+      _fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
+    }
     _fbAuth = firebase.auth();
     return true;
-  }catch(e){ return false; }
+  }catch(e){ console.error('Firebase init error:', e.message); return false; }
 }
+
+// Pre-initialize Firebase as soon as script runs
+window.addEventListener('load', ()=>{ initFirebase(); });
 
 (function initAuth(){
   const expEl   = document.getElementById('loginExpiry');
