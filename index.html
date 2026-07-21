@@ -1267,30 +1267,8 @@ function initFirebase(){
     signBtn.disabled = true;
     signBtn.innerHTML = '⏳ Signing in...';
     showMsg('Opening Google Sign-In...','info');
-
-    // Try GSI One Tap first; fall back to Firebase popup
-    const useGSI = typeof google !== 'undefined' && google.accounts && google.accounts.id;
-
-    if(useGSI){
-      // Try GSI prompt
-      let gsiHandled = false;
-      google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: (response)=>{ gsiHandled = true; handleGSICredential(response); },
-        auto_select: false,
-        cancel_on_tap_outside: true,
-      });
-      google.accounts.id.prompt((notification)=>{
-        if(notification.isNotDisplayed() || notification.isSkippedMoment()){
-          // GSI blocked — fall back to Firebase popup
-          firebaseGoogleSignIn();
-        }
-      });
-      // If GSI doesn't respond in 3 seconds, use Firebase popup
-      setTimeout(()=>{ if(!gsiHandled) firebaseGoogleSignIn(); }, 3000);
-    } else {
-      firebaseGoogleSignIn();
-    }
+    // Always use Firebase popup — most reliable across all platforms
+    await firebaseGoogleSignIn();
   }
 
   async function firebaseGoogleSignIn(){
