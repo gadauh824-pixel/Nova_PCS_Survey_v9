@@ -725,6 +725,59 @@ Additional concerns noted include roof seepage and damage, window/door misalignm
         </div>
       </div>
 
+      <!-- Report Header / Footer Settings -->
+      <div class="card">
+        <h3>📄 Report Header &amp; Footer <span class="hint">appears in every Word export</span></h3>
+
+        <div class="info-section-title">Header — Left Logo</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div id="logoPreviewLeft" style="width:80px;height:50px;border:1.5px dashed var(--g2);border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--g1);font-size:11px;color:var(--g3);text-align:center;flex-shrink:0">No logo</div>
+          <div style="flex:1">
+            <button onclick="document.getElementById('logoInputLeft').click()" style="width:100%;padding:10px;background:var(--navy);color:#fff;border:0;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">📷 Upload Left Logo</button>
+            <input type="file" id="logoInputLeft" accept="image/*" class="hidden">
+            <button onclick="clearLogo('left')" style="width:100%;padding:7px;background:var(--g2);color:var(--g4);border:0;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;margin-top:4px">✕ Remove</button>
+          </div>
+        </div>
+
+        <div class="info-section-title">Header — Right Logo</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div id="logoPreviewRight" style="width:80px;height:50px;border:1.5px dashed var(--g2);border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--g1);font-size:11px;color:var(--g3);text-align:center;flex-shrink:0">No logo</div>
+          <div style="flex:1">
+            <button onclick="document.getElementById('logoInputRight').click()" style="width:100%;padding:10px;background:var(--navy);color:#fff;border:0;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">📷 Upload Right Logo</button>
+            <input type="file" id="logoInputRight" accept="image/*" class="hidden">
+            <button onclick="clearLogo('right')" style="width:100%;padding:7px;background:var(--g2);color:var(--g4);border:0;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;margin-top:4px">✕ Remove</button>
+          </div>
+        </div>
+
+        <div class="info-section-title">Header — Centre Logo (optional, replaces centre text)</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div id="logoPreviewCentre" style="width:80px;height:50px;border:1.5px dashed var(--g2);border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--g1);font-size:11px;color:var(--g3);text-align:center;flex-shrink:0">No logo</div>
+          <div style="flex:1">
+            <button onclick="document.getElementById('logoInputCentre').click()" style="width:100%;padding:10px;background:var(--navy);color:#fff;border:0;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">📷 Upload Centre Logo</button>
+            <input type="file" id="logoInputCentre" accept="image/*" class="hidden">
+            <button onclick="clearLogo('centre')" style="width:100%;padding:7px;background:var(--g2);color:var(--g4);border:0;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;margin-top:4px">✕ Remove</button>
+          </div>
+        </div>
+
+        <div class="info-section-title">Header — Centre Text (used if no centre logo)</div>
+        <input type="text" id="hdr_centre" placeholder="e.g. PRE-CONSTRUCTION CONDITION SURVEY REPORT">
+
+        <div class="info-section-title">Header — Sub Text (below centre)</div>
+        <input type="text" id="hdr_sub" placeholder="e.g. UAE High Speed Rail (HSR) — Contract P2427">
+
+        <div class="info-section-title">Footer — Left Text</div>
+        <input type="text" id="ftr_left" placeholder="e.g. Encardio Rite Geosystems L.L.C">
+
+        <div class="info-section-title">Footer — Centre Text</div>
+        <input type="text" id="ftr_centre" placeholder="e.g. Confidential">
+
+        <div class="hint-text">Page numbers (Page X of Y) are added automatically on the right side of footer.</div>
+
+        <button onclick="saveHeaderFooter()" style="width:100%;padding:12px;background:var(--orange);color:#fff;border:0;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;margin-top:10px">
+          💾 Save Header &amp; Footer
+        </button>
+      </div>
+
       <!-- Save Info Button -->
       <div style="padding:0 10px 10px">
         <button onclick="saveGeneralInfo()" style="width:100%;padding:14px;background:var(--green);color:#fff;border:0;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">
@@ -1189,18 +1242,10 @@ function initFirebase(){
     }
   }catch(e){}
 
-  // Android PWA: handle redirect result after returning from Google/Microsoft sign-in
-  if(typeof firebase !== 'undefined'){
+  // Android PWA: catch redirect result after returning from sign-in
+  if(typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length){
     try{
-      const fbApp = firebase.apps.length ? firebase.apps[0] : firebase.initializeApp({
-        apiKey:"AIzaSyANBG_SgWZtG1X-8qnPirilCSVtapEVs9o",
-        authDomain:"ibalt-44c7a.firebaseapp.com",
-        projectId:"ibalt-44c7a",
-        messagingSenderId:"148681095340",
-        appId:"1:148681095340:web:d098764b5c5c308a6f4709"
-      });
-      const fbAuth = firebase.auth(fbApp);
-      fbAuth.getRedirectResult().then(result=>{
+      firebase.auth().getRedirectResult().then(result=>{
         if(!result || !result.user) return;
         const user = result.user;
         const email = (user.email||'').toLowerCase();
@@ -1209,8 +1254,8 @@ function initFirebase(){
           localStorage.setItem(SESSION_KEY, JSON.stringify({email:user.email,name,ts:Date.now()}));
           unlockApp(name);
         } else {
-          showMsg('❌ Access denied for '+user.email+'. Contact your supervisor.','error');
-          fbAuth.signOut();
+          showMsg('❌ Access denied for '+user.email,'error');
+          firebase.auth().signOut();
         }
       }).catch(()=>{});
     }catch(e){}
@@ -1221,29 +1266,78 @@ function initFirebase(){
   logoutB.addEventListener('click', handleLogout);
 
   // Google Sign-In uses GSI (works in iPhone PWA, Android PWA, desktop)
-  function handleGoogleSignIn(){
+  async function handleGoogleSignIn(){
     signBtn.disabled = true;
     signBtn.innerHTML = '⏳ Signing in...';
     showMsg('Opening Google Sign-In...','info');
-    if(typeof google === 'undefined' || !google.accounts){
-      showMsg('Google Sign-In unavailable. Check internet connection.','error');
+
+    // Try GSI One Tap first; fall back to Firebase popup
+    const useGSI = typeof google !== 'undefined' && google.accounts && google.accounts.id;
+
+    if(useGSI){
+      // Try GSI prompt
+      let gsiHandled = false;
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (response)=>{ gsiHandled = true; handleGSICredential(response); },
+        auto_select: false,
+        cancel_on_tap_outside: true,
+      });
+      google.accounts.id.prompt((notification)=>{
+        if(notification.isNotDisplayed() || notification.isSkippedMoment()){
+          // GSI blocked — fall back to Firebase popup
+          firebaseGoogleSignIn();
+        }
+      });
+      // If GSI doesn't respond in 3 seconds, use Firebase popup
+      setTimeout(()=>{ if(!gsiHandled) firebaseGoogleSignIn(); }, 3000);
+    } else {
+      firebaseGoogleSignIn();
+    }
+  }
+
+  async function firebaseGoogleSignIn(){
+    if(!initFirebase()){
+      showMsg('Sign-In unavailable. Check internet connection.','error');
       signBtn.disabled = false;
       signBtn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:22px;height:22px"> Sign in with Google';
       return;
     }
-    google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleGSICredential,
-      auto_select: false,
-      cancel_on_tap_outside: true,
-    });
-    google.accounts.id.prompt((notification)=>{
-      if(notification.isNotDisplayed() || notification.isSkippedMoment()){
-        // Fallback: render button overlay
-        google.accounts.id.renderButton(signBtn, {theme:'outline',size:'large',width:280});
-        signBtn.disabled = false;
+    try{
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({prompt:'select_account'});
+      const isAndroidPWA = window.matchMedia('(display-mode: standalone)').matches && !window.navigator.standalone;
+      if(isAndroidPWA){
+        await _fbAuth.signInWithRedirect(provider); return;
       }
-    });
+      const result = await _fbAuth.signInWithPopup(provider);
+      const user = result.user;
+      const email = (user.email||'').toLowerCase();
+      const name = user.displayName || user.email;
+      document.getElementById('userName').textContent  = name;
+      document.getElementById('userEmail').textContent = user.email;
+      document.getElementById('userAvatar').src        = user.photoURL||'';
+      userBox.classList.remove('hidden');
+      signBtn.classList.add('hidden');
+      if(ALLOWED_EMAILS.map(e=>e.toLowerCase()).includes(email)){
+        showMsg('✅ Welcome, '+name.split(' ')[0]+'!','success');
+        localStorage.setItem(SESSION_KEY, JSON.stringify({email:user.email,name,ts:Date.now()}));
+        setTimeout(()=>unlockApp(name), 900);
+      } else {
+        showMsg('❌ Access denied for '+user.email,'error');
+        logoutB.classList.remove('hidden');
+        await _fbAuth.signOut();
+      }
+    }catch(err){
+      if(err.code==='auth/popup-closed-by-user'||err.code==='auth/cancelled-popup-request'){
+        showMsg('Sign-in cancelled.','info');
+      } else {
+        showMsg('Sign-in failed: '+(err.message||err.code),'error');
+      }
+      signBtn.disabled = false;
+      signBtn.classList.remove('hidden');
+      signBtn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:22px;height:22px"> Sign in with Google';
+    }
   }
 
   function handleGSICredential(response){
@@ -1423,6 +1517,82 @@ function loadGeneralInfo(){
   }catch(e){}
 }
 
+/* ── HEADER / FOOTER SETTINGS ──────────────────────────── */
+const HDR_KEY = 'pcs.headerFooter';
+
+function saveHeaderFooter(){
+  const data = {
+    hdrCentre: document.getElementById('hdr_centre').value.trim(),
+    hdrSub:    document.getElementById('hdr_sub').value.trim(),
+    ftrLeft:   document.getElementById('ftr_left').value.trim(),
+    ftrCentre: document.getElementById('ftr_centre').value.trim(),
+  };
+  localStorage.setItem(HDR_KEY, JSON.stringify(data));
+  toast('Header & Footer saved ✓','success');
+}
+
+function loadHeaderFooter(){
+  try{
+    const d = JSON.parse(localStorage.getItem(HDR_KEY)||'null');
+    if(!d) return;
+    if(d.hdrCentre) document.getElementById('hdr_centre').value = d.hdrCentre;
+    if(d.hdrSub)    document.getElementById('hdr_sub').value    = d.hdrSub;
+    if(d.ftrLeft)   document.getElementById('ftr_left').value   = d.ftrLeft;
+    if(d.ftrCentre) document.getElementById('ftr_centre').value = d.ftrCentre;
+  }catch(e){}
+  loadLogoPreview('left');
+  loadLogoPreview('right');
+}
+
+function getHeaderFooterData(){
+  try{ return JSON.parse(localStorage.getItem(HDR_KEY)||'{}'); }catch(e){ return {}; }
+}
+
+/* ── LOGO HANDLING ──────────────────────────────────────── */
+function setupLogoInput(side){
+  const input = document.getElementById('logoInput'+side.charAt(0).toUpperCase()+side.slice(1));
+  if(!input) return;
+  input.addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      localStorage.setItem('pcs.logo.'+side, ev.target.result);
+      showLogoPreview(side, ev.target.result);
+      toast((side==='left'?'Left':side==='right'?'Right':'Centre')+' logo saved ✓','success');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function showLogoPreview(side, dataUrl){
+  const el = document.getElementById('logoPreview'+side.charAt(0).toUpperCase()+side.slice(1));
+  if(!el) return;
+  if(dataUrl){
+    el.innerHTML = '<img src="'+dataUrl+'" style="max-width:76px;max-height:46px;object-fit:contain;border-radius:4px">';
+  } else {
+    el.innerHTML = 'No logo';
+    el.style.fontSize = '11px';
+  }
+}
+
+function loadLogoPreview(side){
+  const data = localStorage.getItem('pcs.logo.'+side);
+  showLogoPreview(side, data||'');
+}
+
+function clearLogo(side){
+  localStorage.removeItem('pcs.logo.'+side);
+  showLogoPreview(side, '');
+  const input = document.getElementById('logoInput'+side.charAt(0).toUpperCase()+side.slice(1));
+  if(input) input.value = '';
+  toast((side==='left'?'Left':side==='right'?'Right':'Centre')+' logo removed','success');
+}
+
+function getLogoBase64(side){
+  return localStorage.getItem('pcs.logo.'+side)||'';
+}
+
 function fillCoordsFromPaste(){
   const raw = document.getElementById('inf_paste').value.trim();
   if(!raw){ toast('Paste coordinates first','error'); return; }
@@ -1496,40 +1666,97 @@ async function getGPSLocation(){
 }
 
 async function fetchStaticMapImage(lat, lng){
-  // Use OpenStreetMap static tile at zoom 17 (~200m view)
-  // Tile calculation for zoom 17
+  // Stitch a 3×3 grid of OSM tiles for a good map view
   try{
     const zoom = 17;
-    const tileX = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
-    const tileY = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
-    // Fetch 3x3 grid of tiles and stitch (center tile + 1 around)
-    // For simplicity use a single static map URL via public API
-    const url = `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=17&size=600x400&maptype=mapnik&markers=${lat},${lng},red`;
-    const response = await fetch(url);
-    if(response.ok){
-      S_mapImageBlob = await response.blob();
-      toast('🗺 Map image ready for Word export','success');
-    } else {
-      // Fallback: try tile-based approach
-      await fetchTileBasedMap(lat, lng, zoom);
-    }
+    const mapCanvas = document.createElement('canvas');
+    const TILE_SIZE = 256;
+    const GRID = 3; // 3x3 tiles
+    mapCanvas.width  = TILE_SIZE * GRID;
+    mapCanvas.height = TILE_SIZE * GRID;
+    const ctx = mapCanvas.getContext('2d');
+    ctx.fillStyle = '#f2efe9';
+    ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+    const cx = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
+    const cy = Math.floor((1 - Math.log(Math.tan(lat * Math.PI/180) + 1/Math.cos(lat * Math.PI/180)) / Math.PI) / 2 * Math.pow(2, zoom));
+
+    const offset = Math.floor(GRID / 2);
+    let loaded = 0;
+    const total = GRID * GRID;
+
+    await new Promise(resolve=>{
+      for(let dy = -offset; dy <= offset; dy++){
+        for(let dx = -offset; dx <= offset; dx++){
+          const tx = cx + dx;
+          const ty = cy + dy;
+          const px = (dx + offset) * TILE_SIZE;
+          const py = (dy + offset) * TILE_SIZE;
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = ()=>{
+            ctx.drawImage(img, px, py, TILE_SIZE, TILE_SIZE);
+            loaded++;
+            if(loaded >= total) resolve();
+          };
+          img.onerror = ()=>{ loaded++; if(loaded >= total) resolve(); };
+          // Rotate between tile servers a,b,c for load balancing
+          const server = ['a','b','c'][(Math.abs(tx+ty))%3];
+          img.src = `https://${server}.tile.openstreetmap.org/${zoom}/${tx}/${ty}.png`;
+        }
+      }
+      setTimeout(resolve, 8000); // max 8s wait
+    });
+
+    // Draw red marker pin at centre
+    const centerX = mapCanvas.width / 2;
+    const centerY = mapCanvas.height / 2;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY - 10, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#CC0000';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY - 1);
+    ctx.lineTo(centerX, centerY + 8);
+    ctx.strokeStyle = '#CC0000';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Draw lat/lng label
+    ctx.font = 'bold 14px Arial';
+    ctx.fillStyle = '#1F3864';
+    ctx.fillRect(centerX - 80, centerY + 12, 160, 22);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.fillText(lat.toFixed(6) + ', ' + lng.toFixed(6), centerX, centerY + 28);
+
+    S_mapImageBlob = await new Promise(r => mapCanvas.toBlob(r, 'image/png', 1.0));
+    toast('🗺 Map image ready for Word export','success');
   }catch(e){
+    console.warn('Map fetch failed:', e);
     await fetchTileBasedMap(lat, lng, 17);
   }
 }
 
 async function fetchTileBasedMap(lat, lng, zoom){
+  // Single tile fallback
   try{
     const tileX = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
-    const tileY = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
-    const url = `https://tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`;
-    const response = await fetch(url);
-    if(response.ok){
-      S_mapImageBlob = await response.blob();
-      toast('🗺 Map tile ready for Word export','success');
-    }
+    const tileY = Math.floor((1 - Math.log(Math.tan(lat * Math.PI/180) + 1/Math.cos(lat * Math.PI/180)) / Math.PI) / 2 * Math.pow(2, zoom));
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise((res, rej)=>{ img.onload=res; img.onerror=rej; img.src=`https://a.tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`; });
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 256;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    S_mapImageBlob = await new Promise(r => c.toBlob(r, 'image/png', 1.0));
+    toast('🗺 Map tile ready','success');
   }catch(e){
-    console.warn('Map image fetch failed:', e);
+    console.warn('Tile fetch also failed:', e);
   }
 }
 
@@ -2439,15 +2666,16 @@ function setPhoto(blob, w, h){
 async function processGalleryFile(file){
   const img = new Image();
   img.onload = ()=>{
-    // Full native resolution — no rotation, use photo exactly as captured
-    const W = img.naturalWidth, H = img.naturalHeight;
+    const size = Math.min(img.naturalWidth, img.naturalHeight);
     const c = document.createElement('canvas');
-    c.width = W; c.height = H;
+    c.width = size; c.height = size;
     const ctx = c.getContext('2d');
-    ctx.drawImage(img, 0, 0, W, H);
+    const sx = (img.naturalWidth-size)/2;
+    const sy = (img.naturalHeight-size)/2;
+    ctx.drawImage(img, sx,sy,size,size, 0,0,size,size);
     const stampDate = file.lastModified ? new Date(file.lastModified) : new Date();
-    stampDateTime(ctx, W, H, stampDate);
-    c.toBlob(blob=>setPhoto(blob,W,H),'image/jpeg',0.98);
+    stampDateTime(ctx, size, size, stampDate);
+    c.toBlob(blob=>setPhoto(blob,size,size),'image/jpeg',0.98);
   };
   img.src = URL.createObjectURL(file);
 }
@@ -2613,9 +2841,10 @@ async function buildExcelForBuilding(buildingId){
       description:e.description,
       condition:e.condition,
       photoId:e.photoId,
-      remarks:e.remarks,
+      remarks:e.remarks||(b.code||'')
+    ,
       lat:e.lat||'',
-      lng:e.lng||''||(b.code||'')
+      lng:e.lng||''
     });
     row.height = 18;
     const def = isDefect(e.condition);
@@ -3077,8 +3306,8 @@ function buildExternalViewsPage(extSlots, extRelIds){
     function photoCell(slot, relData, width){
       if(slot && relData && relData.relId){
         const picNum = relData.picNum;
-        const W = Math.round(4.8 * 360000);  // 4.8cm wide for ext view
-        const H = Math.round(3.6 * 360000);  // 3.6cm high
+        const W = Math.round(7.33 * 360000);  // 7.33cm wide for ext view
+        const H = Math.round(5.5 * 360000);   // 5.5cm high
         const picXml = '<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
           + '<wp:extent cx="' + W + '" cy="' + H + '"/>'
           + '<wp:effectExtent t="0" r="0" b="0" l="0"/>'
@@ -3105,7 +3334,7 @@ function buildExternalViewsPage(extSlots, extRelIds){
           + '<w:t>No Photo</w:t></w:r></w:p></w:tc>';
       }
     }
-    rows += '<w:tr><w:trPr><w:trHeight w:val="2800" w:hRule="exact"/></w:trPr>'
+    rows += '<w:tr><w:trPr><w:trHeight w:val="3118" w:hRule="exact"/></w:trPr>'
       + photoCell(lS, lR, 5200)
       + photoCell(rS, rR, 5200)
       + '</w:tr>';
@@ -3288,8 +3517,127 @@ async function buildWordForBuilding(buildingId, progressCb){
   if(S_mapImageBlob){
     const mapRelId = 'rIdMap001';
     const mapFname = 'location_map.png';
-    mediaFiles[mapFname] = await S_mapImageBlob.arrayBuffer();
+    const mapBuf = await S_mapImageBlob.arrayBuffer();
+    mediaFiles[mapFname] = mapBuf;
     mapOpts = {mapRelId, mapFname};
+  }
+
+  // ── Build header & footer from saved settings ──────────────
+  const hfData = getHeaderFooterData();
+  const logoLeftB64   = getLogoBase64('left');
+  const logoRightB64  = getLogoBase64('right');
+  const logoCentreB64 = getLogoBase64('centre');
+
+  // Add logo images to zip if present
+  let hdrLogoLeftRel  = '';
+  let hdrLogoRightRel = '';
+  let hdrLogoLeftPic   = '';
+  let hdrLogoRightPic  = '';
+  let hdrLogoCentrePic = '';
+  let hdrLogoCentreRel = '';
+
+  if(logoLeftB64){
+    const imgData = logoLeftB64.split(',')[1];
+    const ext = logoLeftB64.startsWith('data:image/png') ? 'png' : 'jpg';
+    zip.file('word/media/logo_left.'+ext, imgData, {base64:true});
+    hdrLogoLeftRel = '<Relationship Id="rIdLogoL" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo_left.'+ext+'"/>';
+    const logoW = Math.round(3.5 * 360000); // 3.5cm wide
+    const logoH = Math.round(1.2 * 360000); // 1.2cm tall
+    hdrLogoLeftPic = '<w:r><w:rPr/><w:drawing><wp:inline><wp:extent cx="' + logoW + '" cy="' + logoH + '"/><wp:docPr id="9001" name="LogoLeft"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="9001" name="LogoLeft"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdLogoL"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + logoW + '" cy="' + logoH + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+  }
+
+  if(logoRightB64){
+    const imgData = logoRightB64.split(',')[1];
+    const ext = logoRightB64.startsWith('data:image/png') ? 'png' : 'jpg';
+    zip.file('word/media/logo_right.'+ext, imgData, {base64:true});
+    hdrLogoRightRel = '<Relationship Id="rIdLogoR" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo_right.'+ext+'"/>';
+    const logoW = Math.round(3.5 * 360000);
+    const logoH = Math.round(1.2 * 360000);
+    hdrLogoRightPic = '<w:r><w:rPr/><w:drawing><wp:inline><wp:extent cx="' + logoW + '" cy="' + logoH + '"/><wp:docPr id="9002" name="LogoRight"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="9002" name="LogoRight"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdLogoR"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + logoW + '" cy="' + logoH + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+  }
+
+  if(logoCentreB64){
+    const imgData = logoCentreB64.split(',')[1];
+    const ext = logoCentreB64.startsWith('data:image/png') ? 'png' : 'jpg';
+    zip.file('word/media/logo_centre.'+ext, imgData, {base64:true});
+    hdrLogoCentreRel = '<Relationship Id="rIdLogoC" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo_centre.'+ext+'"/>';
+    const logoW = Math.round(5.0 * 360000);
+    const logoH = Math.round(1.5 * 360000);
+    hdrLogoCentrePic = '<w:r><w:rPr/><w:drawing><wp:inline><wp:extent cx="' + logoW + '" cy="' + logoH + '"/><wp:docPr id="9003" name="LogoCentre"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="9003" name="LogoCentre"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdLogoC"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + logoW + '" cy="' + logoH + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+  }
+
+  // Header XML: Logo Left | Centre text | Logo Right
+  const hdrCentreText = hfData.hdrCentre || 'PRE-CONSTRUCTION CONDITION SURVEY';
+  const hdrSubText    = hfData.hdrSub    || '';
+  const ftrLeftText   = hfData.ftrLeft   || 'Encardio Rite Geosystems L.L.C';
+  const ftrCentreText = hfData.ftrCentre || 'Confidential';
+  const hdrXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    + ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
+    + ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+    + ' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"'
+    + ' xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"'
+    + ' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+    + '<w:tbl>'
+    + '<w:tblPr><w:tblW w:w="9800" w:type="dxa"/><w:tblBorders><w:bottom w:val="single" w:sz="4" w:color="1F3864"/></w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>'
+    + '<w:tblGrid><w:gridCol w:w="2800"/><w:gridCol w:w="4200"/><w:gridCol w:w="2800"/></w:tblGrid>'
+    + '<w:tr>'
+    + '<w:tc><w:tcPr><w:tcW w:w="2800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+    + '<w:p><w:pPr><w:jc w:val="left"/><w:spacing w:after="0"/></w:pPr>' + hdrLogoLeftPic + '</w:p></w:tc>'
+    + '<w:tc><w:tcPr><w:tcW w:w="4200" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+    + (hdrLogoCentrePic
+        ? '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>' + hdrLogoCentrePic + '</w:p>'
+        : '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+          + '<w:r><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="16"/></w:rPr><w:t>' + xmlEscape(hdrCentreText) + '</w:t></w:r></w:p>'
+          + (hdrSubText ? '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="14"/><w:color w:val="595959"/></w:rPr><w:t>' + xmlEscape(hdrSubText) + '</w:t></w:r></w:p>' : ''))
+    + '</w:tc>'
+    + '<w:tc><w:tcPr><w:tcW w:w="2800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+    + '<w:p><w:pPr><w:jc w:val="right"/><w:spacing w:after="0"/></w:pPr>' + hdrLogoRightPic + '</w:p></w:tc>'
+    + '</w:tr></w:tbl>'
+    + '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>'
+    + '</w:hdr>'
+
+  const ftrXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    + '<w:tbl>'
+    + '<w:tblPr><w:tblW w:w="9800" w:type="dxa"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="1F3864"/></w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>'
+    + '<w:tblGrid><w:gridCol w:w="3200"/><w:gridCol w:w="3400"/><w:gridCol w:w="3200"/></w:tblGrid>'
+    + '<w:tr>'
+    + '<w:tc><w:tcPr><w:tcW w:w="3200" w:type="dxa"/></w:tcPr>'
+    + '<w:p><w:pPr><w:jc w:val="left"/><w:spacing w:after="0"/></w:pPr>'
+    + '<w:r><w:rPr><w:sz w:val="14"/><w:color w:val="595959"/></w:rPr><w:t>' + xmlEscape(ftrLeftText) + '</w:t></w:r></w:p></w:tc>'
+    + '<w:tc><w:tcPr><w:tcW w:w="3400" w:type="dxa"/></w:tcPr>'
+    + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+    + '<w:r><w:rPr><w:sz w:val="14"/><w:color w:val="595959"/></w:rPr><w:t>' + xmlEscape(ftrCentreText) + '</w:t></w:r></w:p></w:tc>'
+    + '<w:tc><w:tcPr><w:tcW w:w="3200" w:type="dxa"/></w:tcPr>'
+    + '<w:p><w:pPr><w:jc w:val="right"/><w:spacing w:after="0"/></w:pPr>'
+    + '<w:r><w:rPr><w:sz w:val="14"/><w:color w:val="595959"/></w:rPr><w:t xml:space="preserve">Page </w:t></w:r>'
+    + '<w:r><w:rPr><w:sz w:val="14"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r>'
+    + '<w:r><w:rPr><w:sz w:val="14"/></w:rPr><w:instrText> PAGE </w:instrText></w:r>'
+    + '<w:r><w:rPr><w:sz w:val="14"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>'
+    + '<w:r><w:rPr><w:sz w:val="14"/><w:color w:val="595959"/></w:rPr><w:t xml:space="preserve"> of </w:t></w:r>'
+    + '<w:r><w:rPr><w:sz w:val="14"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r>'
+    + '<w:r><w:rPr><w:sz w:val="14"/></w:rPr><w:instrText> NUMPAGES </w:instrText></w:r>'
+    + '<w:r><w:rPr><w:sz w:val="14"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>'
+    + '</w:p></w:tc>'
+    + '</w:tr></w:tbl>'
+    + '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>'
+    + '</w:ftr>'
+
+
+  zip.file('word/header1.xml', hdrXml);
+  zip.file('word/footer1.xml', ftrXml);
+
+  // Header needs its own _rels file for logo images
+  if(hdrLogoLeftRel || hdrLogoRightRel || hdrLogoCentreRel){
+    const hdrRels = '<?xml version="1.0" encoding="utf-8"?>'
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + (hdrLogoLeftRel   ? hdrLogoLeftRel   : '')
+      + (hdrLogoRightRel  ? hdrLogoRightRel  : '')
+      + (hdrLogoCentreRel ? hdrLogoCentreRel : '')
+      + '</Relationships>';
+    zip.file('word/_rels/header1.xml.rels', hdrRels);
   }
 
   zip.file('word/_rels/document.xml.rels',
@@ -3301,32 +3649,13 @@ async function buildWordForBuilding(buildingId, progressCb){
     + '<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes" Target="endnotes.xml"/>'
     + '<Relationship Id="rIdHdr1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>'
     + '<Relationship Id="rIdFtr1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>'
+    + (hdrLogoLeftRel   ? '\n' + hdrLogoLeftRel   : '')
+    + (hdrLogoRightRel  ? '\n' + hdrLogoRightRel  : '')
+    + (hdrLogoCentreRel ? '\n' + hdrLogoCentreRel : '')
     + imgRels
     + (extImgRels ? '\n' + extImgRels : '')
     + (mapOpts.mapRelId ? '\n<Relationship Id="' + mapOpts.mapRelId + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/' + mapOpts.mapFname + '"/>' : '')
     + '</Relationships>');
-
-  // Header XML
-  zip.file('word/header1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-<w:p><w:pPr><w:jc w:val="left"/><w:rPr><w:sz w:val="16"/></w:rPr></w:pPr>
-<w:r><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="16"/></w:rPr><w:t xml:space="preserve">UAE High Speed Rail (HSR) — Pre-Construction Condition Survey | </w:t></w:r>
-<w:r><w:rPr><w:sz w:val="16"/></w:rPr><w:t xml:space="preserve">${xmlEscape(b.name)}${b.code?' ('+xmlEscape(b.code)+')':''}</w:t></w:r>
-</w:p></w:hdr>`);
-
-  // Footer XML
-  zip.file('word/footer1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-<w:p><w:pPr><w:jc w:val="center"/></w:pPr>
-<w:r><w:rPr><w:color w:val="595959"/><w:sz w:val="16"/></w:rPr><w:t xml:space="preserve">Encardio Rite Geosystems L.L.C  |  Confidential  |  Page </w:t></w:r>
-<w:r><w:rPr><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r>
-<w:r><w:rPr><w:sz w:val="16"/></w:rPr><w:instrText> PAGE </w:instrText></w:r>
-<w:r><w:rPr><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>
-<w:r><w:rPr><w:color w:val="595959"/><w:sz w:val="16"/></w:rPr><w:t xml:space="preserve"> of </w:t></w:r>
-<w:r><w:rPr><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r>
-<w:r><w:rPr><w:sz w:val="16"/></w:rPr><w:instrText> NUMPAGES </w:instrText></w:r>
-<w:r><w:rPr><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>
-</w:p></w:ftr>`);
 
   // Load general info from localStorage
   let info = {};
@@ -3367,7 +3696,7 @@ async function buildWordForBuilding(buildingId, progressCb){
 <w:r><w:rPr><w:rFonts w:ascii="Calibri" w:cs="Calibri" w:eastAsia="Calibri" w:hAnsi="Calibri"/><w:b/><w:bCs/><w:color w:val="1F3864"/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr><w:t xml:space="preserve">${xmlEscape(b.name)} - Survey Report</w:t></w:r>
 </w:p>
 ${bodyContent}
-<w:p><w:pPr><w:spacing w:after="0"/><w:sectPr><w:headerReference w:type="default" r:id="rIdHdr1"/><w:footerReference w:type="default" r:id="rIdFtr1"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1000" w:right="720" w:bottom="1000" w:left="720" w:header="450" w:footer="450" w:gutter="0"/></w:sectPr></w:pPr></w:p>
+<w:p><w:pPr><w:spacing w:after="0"/><w:sectPr><w:headerReference w:type="default" r:id="rIdHdr1"/><w:footerReference w:type="default" r:id="rIdFtr1"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1100" w:right="720" w:bottom="1100" w:left="720" w:header="500" w:footer="500" w:gutter="0"/></w:sectPr></w:pPr></w:p>
 </w:body>
 </w:document>`);
 
@@ -3795,6 +4124,10 @@ function escapeAttr(s){ return escapeHtml(s); }
   await loadEntries();
   await refreshFromBuilding();
   loadGeneralInfo();
+  loadHeaderFooter();
+  setupLogoInput('left');
+  setupLogoInput('right');
+  setupLogoInput('centre');
 
   // Initialize external view slots
   setExtCount(4);
@@ -3811,7 +4144,7 @@ function escapeAttr(s){ return escapeHtml(s); }
 
   // Service Worker for offline — /sw.js must be deployed alongside index.html
   if('serviceWorker' in navigator){
-    try{ await navigator.serviceWorker.register('./sw.js',{scope:'/'}); }
+    try{ await navigator.serviceWorker.register('/sw.js',{scope:'/'}); }
     catch(e){ console.warn('SW registration failed:',e); }
   }
 })();
