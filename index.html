@@ -1247,9 +1247,9 @@ window.addEventListener('load', ()=>{ initFirebase(); });
   }catch(e){}
 
   // Android PWA: catch redirect result after returning from sign-in
-  if(typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length){
+  if(initFirebase()){
     try{
-      firebase.auth().getRedirectResult().then(result=>{
+      _fbAuth.getRedirectResult().then(result=>{
         if(!result || !result.user) return;
         const user = result.user;
         const email = (user.email||'').toLowerCase();
@@ -1259,7 +1259,7 @@ window.addEventListener('load', ()=>{ initFirebase(); });
           unlockApp(name);
         } else {
           showMsg('❌ Access denied for '+user.email,'error');
-          firebase.auth().signOut();
+          _fbAuth.signOut();
         }
       }).catch(()=>{});
     }catch(e){}
@@ -1269,29 +1269,61 @@ window.addEventListener('load', ()=>{ initFirebase(); });
   msBtn.addEventListener('click', handleMicrosoftSignIn);
   logoutB.addEventListener('click', handleLogout);
 
-  // Google Sign-In uses GSI (works in iPhone PWA, Android PWA, desktop)
-  function handleGoogleSignIn(){
+  // Google Sign-In via Firebase (popup on desktop, redirect in PWA) — GSI One Tap removed
+  async function handleGoogleSignIn(){
     signBtn.disabled = true;
-    signBtn.innerHTML = '⏳ Signing in...';
+    signBtn.innerHTML = '&#9203; Signing in...';
     showMsg('Opening Google Sign-In...','info');
-    if(typeof google === 'undefined' || !google.accounts){
-      showMsg('Google Sign-In unavailable. Check internet connection.','error');
+    if(!initFirebase()){
+      showMsg('Google Sign-In requires internet. Connect and try again.','error');
       signBtn.disabled = false;
       signBtn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:22px;height:22px"> Sign in with Google';
       return;
     }
-    google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleGSICredential,
-      auto_select: false,
-      cancel_on_tap_outside: true,
-    });
-    google.accounts.id.prompt((notification)=>{
-      if(notification.isNotDisplayed() || notification.isSkippedMoment()){
-        google.accounts.id.renderButton(signBtn, {theme:'outline',size:'large',width:280});
-        signBtn.disabled = false;
+    try{
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({prompt:'select_account'});
+      const isIOSPWA     = window.navigator.standalone === true;
+      const isAndroidPWA = window.matchMedia('(display-mode: standalone)').matches;
+      if(isIOSPWA || isAndroidPWA){
+        await _fbAuth.signInWithRedirect(provider);
+        return;
       }
-    });
+      const result = await _fbAuth.signInWithPopup(provider);
+      const user  = result.user;
+      const email = (user.email||'').toLowerCase();
+      const name  = user.displayName || user.email;
+      document.getElementById('userName').textContent  = name;
+      document.getElementById('userEmail').textContent = user.email;
+      document.getElementById('userAvatar').src        = user.photoURL||'';
+      userBox.classList.remove('hidden');
+      signBtn.classList.add('hidden');
+      msBtn.classList.add('hidden');
+      if(ALLOWED_EMAILS.map(e=>e.toLowerCase()).includes(email)){
+        showMsg('\u2705 Access granted. Welcome, ' + name.split(' ')[0] + '!','success');
+        localStorage.setItem(SESSION_KEY, JSON.stringify({email:user.email,name,ts:Date.now()}));
+        setTimeout(()=>unlockApp(name), 900);
+      } else {
+        showMsg('\u274C Access denied for ' + user.email + '. Contact your supervisor.','error');
+        logoutB.classList.remove('hidden');
+        await _fbAuth.signOut();
+      }
+    }catch(err){
+      if(err.code==='auth/popup-closed-by-user' || err.code==='auth/cancelled-popup-request'){
+        showMsg('Sign-in cancelled.','info');
+      } else if(err.code==='auth/popup-blocked'){
+        try{ await _fbAuth.signInWithRedirect(new firebase.auth.GoogleAuthProvider()); return; }catch(_){ }
+        showMsg('Popup blocked. Please allow popups and retry.','error');
+      } else if(err.code==='auth/network-request-failed'){
+        showMsg('No internet connection. Cannot sign in.','error');
+      } else {
+        showMsg('Sign-in failed: '+(err.message||err.code),'error');
+      }
+      signBtn.disabled = false;
+      signBtn.classList.remove('hidden');
+      msBtn.classList.remove('hidden');
+      signBtn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:22px;height:22px"> Sign in with Google';
+    }
   }
 
   // Dummy firebaseGoogleSignIn kept for Android PWA redirect result handling
@@ -1324,34 +1356,6 @@ window.addEventListener('load', ()=>{ initFirebase(); });
       } else {
         showMsg('Sign-in failed: '+(err.message||err.code),'error');
       }
-      signBtn.disabled = false;
-      signBtn.classList.remove('hidden');
-      signBtn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:22px;height:22px"> Sign in with Google';
-    }
-  }
-
-  function handleGSICredential(response){
-    try{
-      const payload = JSON.parse(atob(response.credential.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
-      const email = (payload.email || '').toLowerCase();
-      const name  = payload.name  || payload.email;
-      const pic   = payload.picture || '';
-      document.getElementById('userName').textContent  = name;
-      document.getElementById('userEmail').textContent = payload.email;
-      document.getElementById('userAvatar').src        = pic;
-      userBox.classList.remove('hidden');
-      signBtn.classList.add('hidden');
-      if(ALLOWED_EMAILS.map(e=>e.toLowerCase()).includes(email)){
-        showMsg('✅ Access granted. Welcome, ' + name.split(' ')[0] + '!','success');
-        localStorage.setItem(SESSION_KEY, JSON.stringify({email:payload.email,name,ts:Date.now()}));
-        setTimeout(()=>unlockApp(name), 1000);
-      } else {
-        showMsg('❌ Access denied for ' + payload.email + '. Contact your supervisor.','error');
-        logoutB.classList.remove('hidden');
-        if(typeof google !== 'undefined') google.accounts.id.revoke(payload.email, ()=>{});
-      }
-    }catch(err){
-      showMsg('Sign-in failed. Please try again.','error');
       signBtn.disabled = false;
       signBtn.classList.remove('hidden');
       signBtn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:22px;height:22px"> Sign in with Google';
@@ -3561,9 +3565,6 @@ async function buildWordForBuilding(buildingId, progressCb){
   const logoFtrLeftB64  = BUILTIN_FTR_L;
   const logoFtrRightB64 = BUILTIN_FTR_R;
 
-  // Add logo images to zip if present
-  let hdrLogoLeftRel  = '';
-  let hdrLogoRightRel = '';
   // ── Logo images → zip ────────────────────────────────────
   let hdrLogoLeftPic   = '';
   let hdrLogoRightPic  = '';
