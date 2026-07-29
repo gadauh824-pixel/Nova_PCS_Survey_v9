@@ -2990,7 +2990,7 @@ function docxPicParagraph(relId, picNum, hasDefect){
   return `<w:p>${pPr}${picRun}${ovalRun}</w:p>`;
 }
 
-function buildInfoPage(b, info){
+function buildInfoPage(b, info, ents){
   // ── Helpers ──────────────────────────────────────────────
   function infoRow(label, value){
     return '<w:tr><w:trPr><w:trHeight w:val="380" w:hRule="atLeast"/></w:trPr>'
@@ -3064,6 +3064,9 @@ function buildInfoPage(b, info){
     + '</w:p></w:tc></w:tr>';
   const summaryTbl = '<w:tbl>' + summaryTblPr + summaryTblGrid + summaryRow + '</w:tbl>';
 
+  // ── CONSOLIDATED CRACK REGISTER SUMMARY ──────────────────
+  const crackSummary = buildCrackRegisterSummary(ents || [], info);
+
   return purposeHeading
     + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
     + purposeText
@@ -3074,7 +3077,186 @@ function buildInfoPage(b, info){
     + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
     + summaryHeading
     + '<w:p><w:pPr><w:spacing w:after="40"/></w:pPr></w:p>'
-    + summaryTbl;
+    + summaryTbl
+    + crackSummary;
+}
+
+// ── Crack Register Summary builder ─────────────────────────
+function buildCrackRegisterSummary(ents, info){
+  const xe = xmlEscape;
+
+  // Split crack vs non-crack entries
+  const crackEnts = ents.filter(e => isDefect(e.condition) && /crack/i.test(e.condition || ''));
+  const otherEnts = ents.filter(e => isDefect(e.condition) && !/crack/i.test(e.condition || ''));
+
+  // Parse crack width (mm) out of the condition string, if present
+  function parseWidth(cond){
+    const m = (cond || '').match(/Width:\s*([\d.]+)\s*mm/i);
+    return m ? m[1] : '';
+  }
+  // Derive degree label from a numeric width via CRACK_DEGREES
+  function degreeFor(widthStr){
+    const v = parseFloat(widthStr);
+    if(!v) return '';
+    const d = getCrackDegree(v);
+    return d ? d.label : '';
+  }
+  function catFor(widthStr){
+    const v = parseFloat(widthStr);
+    if(!v) return '';
+    const d = getCrackDegree(v);
+    return d ? String(d.cat) : '';
+  }
+
+  // ── borders (single, thin, black) ──
+  const bd = '<w:tblBorders>'
+    + '<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '</w:tblBorders>';
+
+  // cell builder: text, width(dxa), bold?, fill?, whiteText?
+  function tc(text, width, bold, fill, white){
+    const b  = bold  ? '<w:b/><w:bCs/>' : '';
+    const col = white ? '<w:color w:val="FFFFFF"/>' : '';
+    const sh = fill ? '<w:shd w:val="clear" w:color="auto" w:fill="' + fill + '"/>' : '';
+    return '<w:tc><w:tcPr><w:tcW w:w="' + width + '" w:type="dxa"/>' + sh + '</w:tcPr>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + b + col
+      + '<w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+      + '<w:t xml:space="preserve">' + xe(text == null ? '' : String(text)) + '</w:t></w:r>'
+      + '</w:p></w:tc>';
+  }
+  const HDR = '1F4E79';   // dark blue header
+  const ACC = 'E2EFDA';   // light green accent
+
+  const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+  const heading = docxPara([{text:'Consolidated Crack Register Summary',bold:true,size:24,color:'1F3864'}]);
+
+  // ── Intro paragraph (Burland et al. 1977) ──
+  const intro = '<w:p><w:pPr><w:spacing w:after="120"/></w:pPr>'
+    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+    + '<w:t xml:space="preserve">The cracks recorded during the pre-construction condition survey are consolidated below. '
+    + 'Damage categories and degree of damage are classified in accordance with Burland et al. (1977).</w:t></w:r></w:p>';
+
+  // ── MAIN CRACK TABLE ──
+  // Col widths (dxa) sum = 9192: 700|1050|1350|3242|1150|850|850
+  const cw = [700,1050,1350,3242,1150,850,850];
+  const mainGrid = '<w:tblGrid>' + cw.map(w=>'<w:gridCol w:w="'+w+'"/>').join('') + '</w:tblGrid>';
+  const mainPr = '<w:tblPr><w:tblW w:w="9192" w:type="dxa"/>' + bd + '<w:tblLayout w:type="fixed"/></w:tblPr>';
+
+  const mainHeadRow = '<w:tr><w:trPr><w:tblHeader/></w:trPr>'
+    + tc('Sr. No.', cw[0], true, HDR, true)
+    + tc('Picture ID', cw[1], true, HDR, true)
+    + tc('Elevation', cw[2], true, HDR, true)
+    + tc('Crack Location / Description', cw[3], true, HDR, true)
+    + tc('Crack Width (mm)', cw[4], true, HDR, true)
+    + tc('Damage Category', cw[5], true, HDR, true)
+    + tc('Degree of Damage', cw[6], true, HDR, true)
+    + '</w:tr>';
+
+  let mainBody = '';
+  if(crackEnts.length === 0){
+    mainBody = '<w:tr>'
+      + '<w:tc><w:tcPr><w:tcW w:w="9192" w:type="dxa"/><w:gridSpan w:val="7"/></w:tcPr>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:i/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+      + '<w:t xml:space="preserve">No cracks recorded.</w:t></w:r></w:p></w:tc></w:tr>';
+  } else {
+    crackEnts.forEach((e,i)=>{
+      const w = parseWidth(e.condition);
+      mainBody += '<w:tr>'
+        + tc(i+1, cw[0], false)
+        + tc(e.photoId, cw[1], false)
+        + tc(smartTitleCase(e.direction || ''), cw[2], false)
+        + tc(e.description || '', cw[3], false)
+        + tc(w, cw[4], false)
+        + tc(catFor(w), cw[5], false)
+        + tc(degreeFor(w), cw[6], false)
+        + '</w:tr>';
+    });
+  }
+  const mainTbl = '<w:tbl>' + mainPr + mainGrid + mainHeadRow + mainBody + '</w:tbl>';
+
+  // ── NOTES block ──
+  const noteItems = [
+    'Crack widths marked as visual are approximate, observed without measurement instruments.',
+    'Damage categories (0–5) and degree of damage follow Burland et al. (1977).',
+    'This summary consolidates only crack-type defects; other recorded defects are listed separately below.'
+  ];
+  let notes = '<w:p><w:pPr><w:spacing w:before="120" w:after="40"/></w:pPr>'
+    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+    + '<w:t xml:space="preserve">Notes:</w:t></w:r></w:p>';
+  noteItems.forEach((n,i)=>{
+    notes += '<w:p><w:pPr><w:spacing w:after="20"/><w:ind w:left="240"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+      + '<w:t xml:space="preserve">' + (i+1) + '. ' + xe(n) + '</w:t></w:r></w:p>';
+  });
+
+  // ── X.1 NON-CRACK DEFECTS TABLE (grouped by defect type) ──
+  const subHeading = docxPara([{text:'Summary of Other Recorded Defects (Non-Crack)',bold:true,size:22,color:'1F3864'}]);
+
+  // Group non-crack entries by defect type (base of condition string, before any width/detail)
+  const groups = {};
+  otherEnts.forEach(e=>{
+    let type = (e.condition || '').split('(')[0].split(' - ')[0].trim() || 'Defect';
+    type = smartTitleCase(type);
+    if(!groups[type]) groups[type] = {pics:[], elevs:new Set()};
+    groups[type].pics.push(e.photoId);
+    if(e.direction) groups[type].elevs.add(smartTitleCase(e.direction));
+  });
+
+  const ocw = [3000,2500,900,2792]; // sum 9192
+  const oGrid = '<w:tblGrid>' + ocw.map(w=>'<w:gridCol w:w="'+w+'"/>').join('') + '</w:tblGrid>';
+  const oPr = '<w:tblPr><w:tblW w:w="9192" w:type="dxa"/>' + bd + '<w:tblLayout w:type="fixed"/></w:tblPr>';
+  const oHead = '<w:tr><w:trPr><w:tblHeader/></w:trPr>'
+    + tc('Defect Type', ocw[0], true, HDR, true)
+    + tc('Picture ID(s)', ocw[1], true, HDR, true)
+    + tc('Qty', ocw[2], true, HDR, true)
+    + tc('Elevation(s)', ocw[3], true, HDR, true)
+    + '</w:tr>';
+  let oBody = '';
+  const gKeys = Object.keys(groups);
+  if(gKeys.length === 0){
+    oBody = '<w:tr>'
+      + '<w:tc><w:tcPr><w:tcW w:w="9192" w:type="dxa"/><w:gridSpan w:val="4"/></w:tcPr>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:i/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+      + '<w:t xml:space="preserve">No other defects recorded.</w:t></w:r></w:p></w:tc></w:tr>';
+  } else {
+    gKeys.forEach(k=>{
+      const g = groups[k];
+      oBody += '<w:tr>'
+        + tc(k, ocw[0], false, ACC)
+        + tc(g.pics.join(', '), ocw[1], false)
+        + tc(g.pics.length, ocw[2], false)
+        + tc(Array.from(g.elevs).join(', '), ocw[3], false)
+        + '</w:tr>';
+    });
+  }
+  const oTbl = '<w:tbl>' + oPr + oGrid + oHead + oBody + '</w:tbl>';
+
+  // ── Overall Assessment paragraph ──
+  const assessment = '<w:p><w:pPr><w:spacing w:before="160" w:after="80"/></w:pPr>'
+    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+    + '<w:t xml:space="preserve">Overall Assessment: </w:t></w:r>'
+    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+    + '<w:t xml:space="preserve">' + xe(info.summary || 'Based on the recorded cracks and defects, the overall condition is assessed in accordance with Burland et al. (1977).')
+    + '</w:t></w:r></w:p>';
+
+  const gap = '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>';
+
+  return pageBreak
+    + heading + gap
+    + intro
+    + mainTbl
+    + notes + gap
+    + subHeading + gap
+    + oTbl
+    + assessment;
 }
 
 function buildReferencesPage(){
@@ -3750,7 +3932,7 @@ async function buildWordForBuilding(buildingId, progressCb){
   const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
 
   // ── Page 1: Purpose + General Information ───────────────
-  const infoPage = buildInfoPage(b, info);
+  const infoPage = buildInfoPage(b, info, ents);
 
   // ── Page 2: References (Burland 1977) ───────────────────
   const refsPage = buildReferencesPage();
