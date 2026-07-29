@@ -3081,6 +3081,41 @@ function buildInfoPage(b, info, ents){
     + crackSummary;
 }
 
+// ── Table of Contents page builder ─────────────────────────
+function buildTOCPage(ents){
+  const hasCracks = (ents || []).some(e => isDefect(e.condition) && /crack/i.test(e.condition || ''));
+  const hasPhotos = (ents || []).length > 0;
+
+  // TOC heading
+  const heading = docxPara([{text:'Table of Contents',bold:true,size:28,color:'1F3864'}], {align:'center'});
+
+  // A TOC line: title (left) ... page-ish tab (right). Uses a right tab with dot leader.
+  function tocLine(text, bold){
+    const b = bold ? '<w:b/><w:bCs/>' : '';
+    return '<w:p><w:pPr><w:spacing w:after="80"/>'
+      + '<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9900"/></w:tabs></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + b + '<w:sz w:val="22"/><w:szCs w:val="22"/><w:color w:val="1F3864"/></w:rPr>'
+      + '<w:t xml:space="preserve">' + xmlEscape(text) + '</w:t></w:r>'
+      + '<w:r><w:rPr><w:sz w:val="22"/></w:rPr><w:tab/></w:r>'
+      + '</w:p>';
+  }
+
+  let lines = '';
+  lines += tocLine('1. Purpose', true);
+  lines += tocLine('2. General Information', true);
+  lines += tocLine('   Summary / Comments', false);
+  if(hasCracks || hasPhotos){
+    lines += tocLine('   Consolidated Crack Register Summary', false);
+    lines += tocLine('   Summary of Other Recorded Defects (Non-Crack)', false);
+  }
+  lines += tocLine('3. References (Burland et al. 1977)', true);
+  lines += tocLine('4. Location Map', true);
+  if(hasPhotos) lines += tocLine('5. Photographic Records', true);
+
+  const gap = '<w:p><w:pPr><w:spacing w:after="200"/></w:pPr></w:p>';
+  return heading + gap + lines;
+}
+
 // ── Crack Register Summary builder ─────────────────────────
 function buildCrackRegisterSummary(ents, info){
   const xe = xmlEscape;
@@ -3181,21 +3216,6 @@ function buildCrackRegisterSummary(ents, info){
   }
   const mainTbl = '<w:tbl>' + mainPr + mainGrid + mainHeadRow + mainBody + '</w:tbl>';
 
-  // ── NOTES block ──
-  const noteItems = [
-    'Crack widths marked as visual are approximate, observed without measurement instruments.',
-    'Damage categories (0–5) and degree of damage follow Burland et al. (1977).',
-    'This summary consolidates only crack-type defects; other recorded defects are listed separately below.'
-  ];
-  let notes = '<w:p><w:pPr><w:spacing w:before="120" w:after="40"/></w:pPr>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">Notes:</w:t></w:r></w:p>';
-  noteItems.forEach((n,i)=>{
-    notes += '<w:p><w:pPr><w:spacing w:after="20"/><w:ind w:left="240"/></w:pPr>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-      + '<w:t xml:space="preserve">' + (i+1) + '. ' + xe(n) + '</w:t></w:r></w:p>';
-  });
-
   // ── X.1 NON-CRACK DEFECTS TABLE (grouped by defect type) ──
   const subHeading = docxPara([{text:'Summary of Other Recorded Defects (Non-Crack)',bold:true,size:22,color:'1F3864'}]);
 
@@ -3239,24 +3259,15 @@ function buildCrackRegisterSummary(ents, info){
   }
   const oTbl = '<w:tbl>' + oPr + oGrid + oHead + oBody + '</w:tbl>';
 
-  // ── Overall Assessment paragraph ──
-  const assessment = '<w:p><w:pPr><w:spacing w:before="160" w:after="80"/></w:pPr>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">Overall Assessment: </w:t></w:r>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">' + xe(info.summary || 'Based on the recorded cracks and defects, the overall condition is assessed in accordance with Burland et al. (1977).')
-    + '</w:t></w:r></w:p>';
-
   const gap = '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>';
 
   return pageBreak
     + heading + gap
     + intro
     + mainTbl
-    + notes + gap
+    + gap
     + subHeading + gap
-    + oTbl
-    + assessment;
+    + oTbl;
 }
 
 function buildReferencesPage(){
@@ -3792,11 +3803,12 @@ async function buildWordForBuilding(buildingId, progressCb){
   if(hdrLogoRightRel)  hdrLogoRightPic  = makePicXml('rIdLogoR', 9002, 'LogoRight',  Math.round(3.8*360000), Math.round(1.2*360000));
   if(hdrLogoCentreRel) hdrLogoCentrePic = makePicXml('rIdLogoC', 9003, 'LogoCentre', Math.round(5.5*360000), Math.round(1.5*360000));
 
-  // Footer logos (built-in from report)
-  ftrLogoLeftRel  = addLogoToZip(logoFtrLeftB64,  'ftr_logo_left',  'rIdFtrL');
-  ftrLogoRightRel = addLogoToZip(logoFtrRightB64, 'ftr_logo_right', 'rIdFtrR');
-  if(ftrLogoLeftRel)  ftrLogoLeftPic  = makePicXml('rIdFtrL', 9004, 'FtrLogoLeft',  Math.round(3.8*360000), Math.round(0.45*360000));
-  if(ftrLogoRightRel) ftrLogoRightPic = makePicXml('rIdFtrR', 9005, 'FtrLogoRight', Math.round(2.5*360000), Math.round(0.48*360000));
+  // Footer logos removed per request — logos are used in the header only.
+  // No footer logo image, relationship, or picture is generated.
+  ftrLogoLeftRel  = '';
+  ftrLogoRightRel = '';
+  ftrLogoLeftPic  = '';
+  ftrLogoRightPic = '';
 
   // Header/footer text from settings
   const hdrCentreText = hfData.hdrCentre || '';
@@ -3934,6 +3946,9 @@ async function buildWordForBuilding(buildingId, progressCb){
   // ── Page 1: Purpose + General Information ───────────────
   const infoPage = buildInfoPage(b, info, ents);
 
+  // ── Table of Contents (first page) ──────────────────────
+  const tocPage = buildTOCPage(ents);
+
   // ── Page 2: References (Burland 1977) ───────────────────
   const refsPage = buildReferencesPage();
 
@@ -3950,7 +3965,7 @@ async function buildWordForBuilding(buildingId, progressCb){
 
   // ── Assemble all pages ───────────────────────────────────
   // ── Page order: Info → References → Location → External Views → Photos ──
-  const allPages = [infoPage, refsPage, locPage];
+  const allPages = [tocPage, infoPage, refsPage, locPage];
   if(extPage) allPages.push(extPage);   // Page 4: External Views (before photos)
   if(photoPages.length) photoPages.forEach(p=>allPages.push(p));  // Page 5+: Photos
   else allPages.push('<w:p><w:r><w:t>No photo entries captured.</w:t></w:r></w:p>');
