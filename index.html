@@ -626,6 +626,26 @@ textarea{resize:vertical;min-height:60px;line-height:1.5}
         </div>
         <div class="row">
           <div>
+            <label>Structure ID</label>
+            <input type="text" id="inf_structId" placeholder="e.g. ST-278">
+          </div>
+          <div>
+            <label>Cover / Approval Date</label>
+            <input type="text" id="inf_coverDate" placeholder="e.g. 02-July-2026">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Building Owner Name</label>
+            <input type="text" id="inf_owner" placeholder="e.g. Abdullah Al Shehi">
+          </div>
+          <div>
+            <label>Contact Mobile Number</label>
+            <input type="text" id="inf_contact" placeholder="e.g. 0501234567">
+          </div>
+        </div>
+        <div class="row">
+          <div>
             <label>Makani Number</label>
             <input type="text" id="inf_makani" placeholder="e.g. 3902191009">
           </div>
@@ -681,6 +701,13 @@ textarea{resize:vertical;min-height:60px;line-height:1.5}
         <input type="text" id="inf_surveyor" placeholder="e.g. Mr. Adil Khan">
         <label>Name &amp; Signature of PAJV &amp; MLCC Representative</label>
         <input type="text" id="inf_rep" placeholder="e.g. Mr. Altamash Ansari">
+      </div>
+
+      <!-- Project Introduction -->
+      <div class="card">
+        <h3>Project Introduction</h3>
+        <div class="hint-text">Appears as section 1 of the report (editable)</div>
+        <textarea id="inf_intro" style="min-height:120px" placeholder="Project introduction text...">The High-Speed Rail (HSR) Project in UAE remains as one of the most significant public transportation developments within the country and is to set a reference in the region. The vision of this HSR project is to deliver an effective transport system that contributes to the economic growth, quality of life and environmental sustainability of the UAE. The mission is to regulate, plan and develop an efficient and well-integrated transport system that serves the public interest by enhancing safe and sustainable mobility. The ultimate goal of HSR Programme is to create a high-speed rail network that will form the transport backbone of the country and enable passenger connectivity within UAE.</textarea>
       </div>
 
       <!-- Summary -->
@@ -1489,6 +1516,11 @@ function saveGeneralInfo(){
     surveyor:  document.getElementById('inf_surveyor').value.trim(),
     rep:       document.getElementById('inf_rep').value.trim(),
     summary:   document.getElementById('inf_summary').value.trim(),
+    structId:  document.getElementById('inf_structId').value.trim(),
+    coverDate: document.getElementById('inf_coverDate').value.trim(),
+    intro:     document.getElementById('inf_intro').value.trim(),
+    owner:     document.getElementById('inf_owner').value.trim(),
+    contact:   document.getElementById('inf_contact').value.trim(),
     lat:       document.getElementById('inf_lat').value.trim(),
     lng:       document.getElementById('inf_lng').value.trim(),
   };
@@ -1502,7 +1534,7 @@ function loadGeneralInfo(){
     if(!data) return;
     const fields = ['project','client','consultant','contractor','service','bid','bname','makani',
       'plot','address','date','type','levels','basements','age','dim','foundation','structure',
-      'distance','surveyor','rep','summary','lat','lng'];
+      'distance','surveyor','rep','summary','structId','coverDate','intro','owner','contact','lat','lng'];
     fields.forEach(k=>{
       const el = document.getElementById('inf_'+k);
       if(el && data[k]) el.value = data[k];
@@ -1837,7 +1869,7 @@ function renderExtSlots(){
           : `<div class="ext-thumb empty">📷</div>`}
       </div>
       <label style="margin-bottom:4px">Direction</label>
-      <select id="extDir_${i}" style="margin-bottom:8px" onchange="S.extSlots[${i}].dir=this.value">
+      <select id="extDir_${i}" style="margin-bottom:8px" onchange="S.extSlots[${i}].dir=this.value;saveExtPhotos()">
         <option value="">— Select direction —</option>
         ${EXT_DIRECTIONS.map(d=>`<option value="${d}" ${slot.dir===d?'selected':''}>${d}</option>`).join('')}
       </select>
@@ -1872,6 +1904,7 @@ function galleryExtSlot(idx){
 function removeExtSlot(idx){
   S.extSlots[idx].photoBlob = null;
   S.extSlots[idx].photoMeta = null;
+  saveExtPhotos();
   renderExtSlots();
 }
 
@@ -1902,11 +1935,42 @@ function processExtPhoto(file){
       // update dir from select if changed
       const sel = document.getElementById('extDir_'+idx);
       if(sel) S.extSlots[idx].dir = sel.value;
+      saveExtPhotos();
       toast(`View ${idx+1} saved ✓`,'success');
       renderExtSlots();
     },'image/jpeg',0.95);
   };
   img.src = URL.createObjectURL(file);
+}
+
+/* ── EXTERNAL PHOTO PERSISTENCE (per building) ─────────────── */
+async function saveExtPhotos(){
+  if(!S.currentBuildingId || !db) return;
+  try{
+    const slots = S.extSlots.map(s => ({
+      dir: s.dir || '',
+      label: s.label || '',
+      blob: s.photoBlob || null,
+      meta: s.photoMeta || null
+    }));
+    await idbPut('extphotos', {buildingId: S.currentBuildingId, count: S.extCount, slots});
+  }catch(e){}
+}
+async function loadExtPhotos(){
+  S.extSlots = [];
+  if(!S.currentBuildingId || !db){ return; }
+  try{
+    const rec = await idbGet('extphotos', S.currentBuildingId);
+    if(rec && rec.slots && rec.slots.length){
+      S.extCount = rec.count || rec.slots.length;
+      S.extSlots = rec.slots.map(s => ({
+        dir: s.dir || '',
+        label: s.label || '',
+        photoBlob: s.blob || null,
+        photoMeta: s.meta || null
+      }));
+    }
+  }catch(e){}
 }
 
 /* ── SPELLING / TITLE-CASE ─────────────────────────────────── */
@@ -1947,7 +2011,7 @@ function smartTitleCase(raw){
 function isDefect(c){ return c && c!=='N/A' && c.trim()!==''; }
 
 /* ── INDEXEDDB ─────────────────────────────────────────────── */
-const DB_NAME='pcs_survey_db_v5', DB_VER=1;
+const DB_NAME='pcs_survey_db_v5', DB_VER=2;
 let db=null;
 function openDB(){
   return new Promise((res,rej)=>{
@@ -1960,6 +2024,7 @@ function openDB(){
         s.createIndex('byBuilding','buildingId',{unique:false});
       }
       if(!d.objectStoreNames.contains('photos')) d.createObjectStore('photos',{keyPath:'entryId'});
+      if(!d.objectStoreNames.contains('extphotos')) d.createObjectStore('extphotos',{keyPath:'buildingId'});
     };
     req.onsuccess = e=>{db=e.target.result;res(db)};
     req.onerror = e=>rej(e);
@@ -2099,6 +2164,8 @@ async function selectBuilding(id){
   S.currentBuildingId = id;
   updateTopbar();
   await loadEntries();
+  await loadExtPhotos();
+  renderExtSlots();
   await refreshFromBuilding();
   renderBuildings();
   toast('Switched building');
@@ -2990,6 +3057,128 @@ function docxPicParagraph(relId, picNum, hasDefect){
   return `<w:p>${pPr}${picRun}${ovalRun}</w:p>`;
 }
 
+function buildCoverPage(b, info){
+  // ── COVER PAGE — matches HSR title block + approval table ──
+  const xe = xmlEscape;
+  const structId = info.structId || info.bid || '';
+  const bname = info.bname || b.name || '';
+  const coverDate = info.coverDate || '';
+  const structLine = 'Structure ID: ' + structId + (bname ? ' (' + bname + ')' : '');
+
+  const bd = '<w:tblBorders>'
+    + '<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '</w:tblBorders>';
+
+  // Centered title lines
+  function titleLine(text, sz){
+    return '<w:p><w:pPr><w:spacing w:before="60" w:after="60"/><w:jc w:val="center"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:bCs/><w:sz w:val="' + sz + '"/><w:szCs w:val="' + sz + '"/></w:rPr>'
+      + '<w:t xml:space="preserve">' + xe(text) + '</w:t></w:r></w:p>';
+  }
+
+  // Top status table (4 cols)
+  function statCell(label, val, w){
+    return '<w:tc><w:tcPr><w:tcW w:w="' + w + '" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:sz w:val="16"/></w:rPr><w:t xml:space="preserve">' + xe(label) + '</w:t></w:r></w:p>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="16"/></w:rPr><w:t xml:space="preserve">' + xe(val) + '</w:t></w:r></w:p></w:tc>';
+  }
+  const statTbl = '<w:tbl><w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + bd + '<w:tblLayout w:type="fixed"/></w:tblPr>'
+    + '<w:tblGrid><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/></w:tblGrid>'
+    + '<w:tr>' + statCell('Responsible Division','P2427',2600) + statCell('Responsible Discipline','EBB-Geotechical',2600)
+      + statCell('Document Type','FS-Specification',2600) + statCell('Document Status','Issued for Approval',2600) + '</w:tr>'
+    + '</w:tbl>';
+
+  // Approval table (Prepared/Checked/Quality/Approved) — names hard-coded, dates editable
+  function apCell(text, w, bold, sz){
+    return '<w:tc><w:tcPr><w:tcW w:w="' + w + '" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + (bold?'<w:b/>':'') + '<w:sz w:val="' + (sz||18) + '"/></w:rPr>'
+      + '<w:t xml:space="preserve">' + xe(text) + '</w:t></w:r></w:p></w:tc>';
+  }
+  function apRow(role, name, title, date){
+    // two stacked lines in the name cell
+    const nameCell = '<w:tc><w:tcPr><w:tcW w:w="3400" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">' + xe(name) + '</w:t></w:r></w:p>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="16"/></w:rPr><w:t xml:space="preserve">' + xe(title) + '</w:t></w:r></w:p></w:tc>';
+    return '<w:tr><w:trPr><w:trHeight w:val="700" w:hRule="atLeast"/></w:trPr>'
+      + apCell(role, 2600, true)
+      + nameCell
+      + apCell('', 2400)
+      + apCell(date, 2000, false)
+      + '</w:tr>';
+  }
+  const apHeadRow = '<w:tr><w:trPr><w:trHeight w:val="300" w:hRule="atLeast"/></w:trPr>'
+    + apCell('', 2600, false) + apCell('Name', 3400, true) + apCell('Signature', 2400, true) + apCell('Date', 2000, true) + '</w:tr>';
+  const approvalTbl = '<w:tbl><w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + bd + '<w:tblLayout w:type="fixed"/></w:tblPr>'
+    + '<w:tblGrid><w:gridCol w:w="2600"/><w:gridCol w:w="3400"/><w:gridCol w:w="2400"/><w:gridCol w:w="2000"/></w:tblGrid>'
+    + apRow('Prepared By','Mohammad Altamush Erum','Technical Office Manager',coverDate)
+    + apRow('Checked and Verified By','Dharmesh KR. Pandey','Sr. Project Manager',coverDate)
+    + apRow('Quality Process Approval','Zhao Xiaobo','Quality Manager',coverDate)
+    + apRow('Approved','Rakesh Arora','Project Director',coverDate)
+    + apHeadRow
+    + '</w:tbl>';
+
+  const gap = '<w:p><w:pPr><w:spacing w:after="120"/></w:pPr></w:p>';
+  const bigGap = '<w:p><w:pPr><w:spacing w:after="360"/></w:pPr></w:p>';
+
+  return statTbl
+    + bigGap
+    + titleLine('UAE High Speed Rail', 40)
+    + titleLine('Contract No. P2427', 40)
+    + titleLine('Design & Build Contract for Etihad High Speed Rail', 36)
+    + titleLine('(Dubai Section)', 36)
+    + bigGap
+    + titleLine('Pre-Construction Condition Survey Report for', 28)
+    + titleLine(structLine, 28)
+    + bigGap
+    + approvalTbl;
+}
+
+function buildDocControlPage(info){
+  // ── PAGE 2 — document control / revision table (date editable) ──
+  const xe = xmlEscape;
+  const coverDate = info.coverDate || '';
+  const bd = '<w:tblBorders>'
+    + '<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+    + '</w:tblBorders>';
+  function c(text, w, bold, sz){
+    return '<w:tc><w:tcPr><w:tcW w:w="' + w + '" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + (bold?'<w:b/>':'') + '<w:sz w:val="' + (sz||16) + '"/></w:rPr>'
+      + '<w:t xml:space="preserve">' + xe(text) + '</w:t></w:r></w:p></w:tc>';
+  }
+  // Document Number row
+  const heading = docxPara([{text:'Document Control',bold:true,size:24,color:'1F3864'}]);
+  const cols = [900,900,900,1400,1200,1400,1400,900,1400];
+  const grid = '<w:tblGrid>' + cols.map(w=>'<w:gridCol w:w="'+w+'"/>').join('') + '</w:tblGrid>';
+  const pr = '<w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + bd + '<w:tblLayout w:type="fixed"/></w:tblPr>';
+  const head = '<w:tr>' + c('Rev.',900,true) + c('Date',900,true,16) + c('Description',900,true)
+    + c('Prepared',1400,true) + c('Checked',1200,true) + c('Reviewed',1400,true) + c('Approved',1400,true)
+    + c('',900,true) + c('',1400,true) + '</w:tr>';
+  const row = '<w:tr>' + c('00',900) + c(coverDate,900) + c('Issued for Approval',900)
+    + c('MAE',1400) + c('DP',1200) + c('',1400) + c('',1400) + c('',900) + c('',1400) + '</w:tr>';
+  const revTbl = '<w:tbl>' + pr + grid + head + row + '</w:tbl>';
+
+  const issuedLine = docxPara([{text:'Issued Date: ' + coverDate,bold:true,size:20,color:'1F3864'}]);
+  const gap = '<w:p><w:pPr><w:spacing w:after="160"/></w:pPr></w:p>';
+
+  return heading + gap + issuedLine + gap + revTbl;
+}
+
 function buildInfoPage(b, info, ents){
   // ── Helpers ──────────────────────────────────────────────
   function infoRow(label, value){
@@ -3014,44 +3203,55 @@ function buildInfoPage(b, info, ents){
   const tblPr2col = '<w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + tblBorders + '</w:tblPr>';
   const tblGrid2col = '<w:tblGrid><w:gridCol w:w="3800"/><w:gridCol w:w="6600"/></w:tblGrid>';
 
-  // ── PURPOSE paragraph ────────────────────────────────────
-  const purposeHeading = docxPara([{text:'1. PURPOSE',bold:true,size:24,color:'1F3864'}]);
-  const purposeText = '<w:p><w:pPr><w:spacing w:after="160"/></w:pPr>'
+  // ── PROJECT INTRODUCTION (section 1) ─────────────────────
+  const introHeading = docxPara([{text:'1. PROJECT INTRODUCTION',bold:true,size:24,color:'1F3864'}]);
+  const introText = '<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>'
     + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">A condition survey shall be undertaken on structures located within the zone of influence of tunnels of the '
-    + xmlEscape(info.project||'the Project')
-    + ' before and after the construction activities. This document comprises of pre-construction condition survey of building ('
-    + xmlEscape((info.bid||'') + (info.bname ? ' — ' + info.bname : ''))
-    + ') located within the zone of influence of the project.</w:t></w:r></w:p>';
+    + '<w:t xml:space="preserve">' + xmlEscape(info.intro || 'The High-Speed Rail (HSR) Project in UAE remains as one of the most significant public transportation developments within the country and is to set a reference in the region.')
+    + '</w:t></w:r></w:p>';
 
-  // ── GENERAL INFORMATION table ────────────────────────────
-  const genHeading = docxPara([{text:'2. GENERAL INFORMATION',bold:true,size:24,color:'1F3864'}]);
+  // ── PURPOSE paragraph (section 2) ────────────────────────
+  const purposeHeading = docxPara([{text:'2. PURPOSE',bold:true,size:24,color:'1F3864'}]);
+  const structRef = info.structId || info.bid || '';
+  const bnameRef = info.bname || b.name || '';
+  const purposeText = '<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>'
+    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+    + '<w:t xml:space="preserve">A condition survey shall be undertaken on structures located within the zone of influence of shafts and tunnels of the '
+    + xmlEscape(info.project||'UAE High Speed Rail (HSR) Project')
+    + ' before and after the construction activities. This document comprises the pre-construction condition survey of building ID: '
+    + xmlEscape(structRef)
+    + (bnameRef ? ', (' + xmlEscape(bnameRef) + ')' : '')
+    + ' located within the zone of influence of the same project.</w:t></w:r></w:p>';
+
+  // ── GENERAL INFORMATION table (section 3) ────────────────
+  const genHeading = docxPara([{text:'3. GENERAL INFORMATION',bold:true,size:24,color:'1F3864'}]);
   let rows = '';
-  rows += infoRow('Project Name',               info.project);
+  rows += infoRow('Project name',               info.project);
   rows += infoRow('Client',                     info.client);
   rows += infoRow('Consultant',                 info.consultant);
   rows += infoRow('Contractor',                 info.contractor);
-  rows += infoRow('Service Provider',           info.service);
-  rows += infoRow('Building ID',                info.bid);
-  rows += infoRow('Building Name',              info.bname || b.name);
+  rows += infoRow('Service provider',           info.service);
+  rows += infoRow('Building Owner Name',        info.owner);
+  rows += infoRow('Contact Person Mobile Number', info.contact);
+  rows += infoRow('Building ID',                info.bname || b.name);
+  rows += infoRow('Structure Number',           info.structId);
   rows += infoRow('Makani Number',              info.makani);
-  rows += infoRow('Plot Number',                info.plot);
-  rows += infoRow('Name & Signature of Surveyor', info.surveyor);
-  rows += infoRow('Name & Signature of PAJV & MLCC Rep', info.rep);
-  rows += infoRow('Survey Date',                info.date);
-  rows += infoRow('No. of Levels (incl. GF & Roof)', info.levels);
-  rows += infoRow('No. of Basements',           info.basements);
-  rows += infoRow('Type of Building',           info.type);
+  rows += infoRow('Name and signature of Surveyor', info.surveyor);
+  rows += infoRow('Name and signature of representative of LCWJV', info.rep);
+  rows += infoRow('Survey date',                info.date);
+  rows += infoRow('No. of levels',              info.levels);
+  rows += infoRow('No. of basements',           info.basements);
+  rows += infoRow('Type of building',           info.type);
   rows += infoRow('Distance from Alignment',    info.distance);
-  rows += infoRow('Address',                    info.address);
+  rows += infoRow('Address of the Building',    info.address);
   rows += infoRow('Age of Building',            info.age);
-  rows += infoRow('Dimension of Building',      info.dim);
+  rows += infoRow('Dimension of the Building',  info.dim);
   rows += infoRow('Foundation Type',            info.foundation);
   rows += infoRow('Structure Form',             info.structure);
   const genTbl = '<w:tbl>' + tblPr2col + tblGrid2col + rows + '</w:tbl>';
 
-  // ── SUMMARY box ──────────────────────────────────────────
-  const summaryHeading = docxPara([{text:'Summary / Comments:',bold:true,size:20,color:'1F3864'}]);
+  // ── SUMMARY box (section 4) ──────────────────────────────
+  const summaryHeading = docxPara([{text:'4. SUMMARY / COMMENTS:',bold:true,size:24,color:'1F3864'}]);
   const summaryTblPr = '<w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + tblBorders + '</w:tblPr>';
   const summaryTblGrid = '<w:tblGrid><w:gridCol w:w="10400"/></w:tblGrid>';
   const summaryRow = '<w:tr><w:trPr><w:trHeight w:val="400" w:hRule="atLeast"/></w:trPr>'
@@ -3067,7 +3267,11 @@ function buildInfoPage(b, info, ents){
   // ── CONSOLIDATED CRACK REGISTER SUMMARY ──────────────────
   const crackSummary = buildCrackRegisterSummary(ents || [], info);
 
-  return purposeHeading
+  return introHeading
+    + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
+    + introText
+    + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
+    + purposeHeading
     + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
     + purposeText
     + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
@@ -3101,16 +3305,18 @@ function buildTOCPage(ents){
   }
 
   let lines = '';
-  lines += tocLine('1. Purpose', true);
-  lines += tocLine('2. General Information', true);
-  lines += tocLine('   Summary / Comments', false);
+  lines += tocLine('1. Project Introduction', true);
+  lines += tocLine('2. Purpose', true);
+  lines += tocLine('3. General Information', true);
+  lines += tocLine('4. Summary / Comments:', true);
   if(hasCracks || hasPhotos){
-    lines += tocLine('   Consolidated Crack Register Summary', false);
-    lines += tocLine('   Summary of Other Recorded Defects (Non-Crack)', false);
+    lines += tocLine('   a. Consolidated Crack Register Summary', false);
+    lines += tocLine('   b. Summary of Other Recorded Defects (Non-Crack)', false);
   }
-  lines += tocLine('3. References (Burland et al. 1977)', true);
-  lines += tocLine('4. Location Map', true);
-  if(hasPhotos) lines += tocLine('5. Photographic Records', true);
+  lines += tocLine('5. References', true);
+  lines += tocLine('6. Location Map', true);
+  lines += tocLine('7. Building External Views', true);
+  if(hasPhotos) lines += tocLine('8. Photographs and Defects Details of Building', true);
 
   const gap = '<w:p><w:pPr><w:spacing w:after="200"/></w:pPr></w:p>';
   return heading + gap + lines;
@@ -3943,10 +4149,16 @@ async function buildWordForBuilding(buildingId, progressCb){
 
   const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
 
-  // ── Page 1: Purpose + General Information ───────────────
+  // ── Page 1: Cover page ──────────────────────────────────
+  const coverPage = buildCoverPage(b, info);
+
+  // ── Page 2: Document control ────────────────────────────
+  const docControlPage = buildDocControlPage(info);
+
+  // ── Purpose + General Information ───────────────
   const infoPage = buildInfoPage(b, info, ents);
 
-  // ── Table of Contents (first page) ──────────────────────
+  // ── Table of Contents ──────────────────────────────────
   const tocPage = buildTOCPage(ents);
 
   // ── Page 2: References (Burland 1977) ───────────────────
@@ -3965,7 +4177,7 @@ async function buildWordForBuilding(buildingId, progressCb){
 
   // ── Assemble all pages ───────────────────────────────────
   // ── Page order: Info → References → Location → External Views → Photos ──
-  const allPages = [tocPage, infoPage, refsPage, locPage];
+  const allPages = [coverPage, docControlPage, tocPage, infoPage, refsPage, locPage];
   if(extPage) allPages.push(extPage);   // Page 4: External Views (before photos)
   if(photoPages.length) photoPages.forEach(p=>allPages.push(p));  // Page 5+: Photos
   else allPages.push('<w:p><w:r><w:t>No photo entries captured.</w:t></w:r></w:p>');
@@ -3975,9 +4187,6 @@ async function buildWordForBuilding(buildingId, progressCb){
   zip.file('word/document.xml',`<?xml version="1.0" encoding="utf-8"?>
 <w:document ${docNS}>
 <w:body>
-<w:p><w:pPr><w:spacing w:after="240"/><w:jc w:val="center"/></w:pPr>
-<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:cs="Calibri" w:eastAsia="Calibri" w:hAnsi="Calibri"/><w:b/><w:bCs/><w:color w:val="1F3864"/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr><w:t xml:space="preserve">${xmlEscape(b.name)} - Survey Report</w:t></w:r>
-</w:p>
 ${bodyContent}
 <w:p><w:pPr><w:spacing w:after="0"/><w:sectPr><w:headerReference w:type="default" r:id="rIdHdr1"/><w:footerReference w:type="default" r:id="rIdFtr1"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="340" w:footer="360" w:gutter="0"/></w:sectPr></w:pPr></w:p>
 </w:body>
@@ -4412,8 +4621,14 @@ function escapeAttr(s){ return escapeHtml(s); }
   setupLogoInput('right');
   setupLogoInput('centre');
 
-  // Initialize external view slots
-  setExtCount(4);
+  // Initialize external view slots (load persisted photos if a building is active)
+  await loadExtPhotos();
+  if(S.extSlots.length){
+    setExtCount(S.extCount || S.extSlots.length);
+    renderExtSlots();
+  } else {
+    setExtCount(4);
+  }
 
   // Set today's date as default in info tab
   const dateEl = document.getElementById('inf_date');
