@@ -786,6 +786,16 @@ Additional concerns noted include roof seepage and damage, window/door misalignm
           </div>
         </div>
 
+        <div class="info-section-title">Cover — Approval Signature (optional, shown in Signature column)</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div id="logoPreviewSign" style="width:80px;height:50px;border:1.5px dashed var(--g2);border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--g1);font-size:11px;color:var(--g3);text-align:center;flex-shrink:0">No logo</div>
+          <div style="flex:1">
+            <button onclick="document.getElementById('logoInputSign').click()" style="width:100%;padding:10px;background:var(--navy);color:#fff;border:0;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">✍ Upload Signature</button>
+            <input type="file" id="logoInputSign" accept="image/*" class="hidden">
+            <button onclick="clearLogo('sign')" style="width:100%;padding:7px;background:var(--g2);color:var(--g4);border:0;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;margin-top:4px">✕ Remove</button>
+          </div>
+        </div>
+
         <div class="info-section-title">Header — Centre Text (used if no centre logo)</div>
         <input type="text" id="hdr_centre" placeholder="e.g. PRE-CONSTRUCTION CONDITION SURVEY REPORT">
 
@@ -820,6 +830,24 @@ Additional concerns noted include roof seepage and damage, window/door misalignm
         <button onclick="getGPSLocation()" id="gpsBtn" style="width:100%;padding:12px;background:linear-gradient(135deg,#1B5E20,#2E7D32);color:#fff;border:0;border-radius:11px;font-size:14px;font-weight:800;cursor:pointer;margin-bottom:10px;letter-spacing:.2px;box-shadow:0 3px 10px rgba(46,125,50,.3)">
           📍 Get My Location (GPS)
         </button>
+
+        <div style="background:#EEF3FB;padding:10px;border-radius:8px;margin-bottom:10px">
+          <label style="margin-bottom:5px">🗂 Import KMZ / KML (pick structure by ID)</label>
+          <button onclick="document.getElementById('kmzInput').click()" style="width:100%;padding:11px;background:var(--navy);color:#fff;border:0;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">
+            📂 Choose KMZ / KML File
+          </button>
+          <input type="file" id="kmzInput" accept=".kmz,.kml,application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml" class="hidden">
+          <div id="kmzStatus" style="font-size:11px;color:var(--g3);margin-top:6px">No file loaded.</div>
+          <div id="kmzPickerWrap" class="hidden" style="margin-top:8px">
+            <label style="margin-bottom:4px">Structure ID</label>
+            <input type="text" id="kmzSearch" placeholder="Type to filter e.g. ST-278" oninput="filterKmzOptions()" style="margin:0 0 6px 0;font-size:13px">
+            <select id="kmzSelect" size="6" style="width:100%;font-size:13px;padding:6px;border:1.5px solid var(--g2);border-radius:8px;background:#fff"></select>
+            <button onclick="applyKmzStructure()" style="width:100%;padding:11px;background:var(--green);color:#fff;border:0;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;margin-top:8px">
+              📍 Load Structure on Map
+            </button>
+          </div>
+        </div>
+
         <div id="mapContainer">
           <iframe id="mapFrame"
             src="https://www.openstreetmap.org/export/embed.html?bbox=55.1,25.0,55.6,25.4&layer=mapnik"
@@ -1585,7 +1613,8 @@ function setupLogoInput(side){
     reader.onload = ev=>{
       localStorage.setItem('pcs.logo.'+side, ev.target.result);
       showLogoPreview(side, ev.target.result);
-      toast((side==='left'?'Left':side==='right'?'Right':'Centre')+' logo saved ✓','success');
+      const lbl = side==='left'?'Left':side==='right'?'Right':side==='centre'?'Centre':side==='sign'?'Signature':side;
+      toast(lbl+' logo saved ✓','success');
     };
     reader.readAsDataURL(file);
   });
@@ -1612,7 +1641,8 @@ function clearLogo(side){
   showLogoPreview(side, '');
   const input = document.getElementById('logoInput'+side.charAt(0).toUpperCase()+side.slice(1));
   if(input) input.value = '';
-  toast((side==='left'?'Left':side==='right'?'Right':'Centre')+' logo removed','success');
+  const lbl = side==='left'?'Left':side==='right'?'Right':side==='centre'?'Centre':side==='sign'?'Signature':side;
+  toast(lbl+' logo removed','success');
 }
 
 function getLogoBase64(side){
@@ -1829,6 +1859,159 @@ function updateMapFromCoords(){
   const frame = document.getElementById('mapFrame');
   frame.src = `https://www.openstreetmap.org/export/embed.html?bbox=${lng-d},${lat-d},${lng+d},${lat+d}&layer=mapnik&marker=${lat},${lng}`;
   toast('Map updated');
+}
+
+/* ── KMZ / KML STRUCTURE IMPORT ────────────────────────────── */
+// Parsed structures from an imported KMZ/KML: [{name, lat, lng}]
+let S_kmzStructures = [];
+
+function setupKmzInput(){
+  const input = document.getElementById('kmzInput');
+  if(!input) return;
+  input.addEventListener('change', async e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const status = document.getElementById('kmzStatus');
+    status.textContent = '⏳ Reading ' + file.name + ' …';
+    try{
+      let kmlText = '';
+      const lower = file.name.toLowerCase();
+      if(lower.endsWith('.kmz')){
+        const buf = await file.arrayBuffer();
+        const zip = await JSZip.loadAsync(buf);
+        // KMZ usually has doc.kml at root; otherwise take the first .kml
+        let kmlEntry = zip.file('doc.kml');
+        if(!kmlEntry){
+          const names = Object.keys(zip.files).filter(n=>n.toLowerCase().endsWith('.kml'));
+          if(names.length) kmlEntry = zip.file(names[0]);
+        }
+        if(!kmlEntry) throw new Error('No .kml found inside the KMZ');
+        kmlText = await kmlEntry.async('string');
+      } else if(lower.endsWith('.kml')){
+        kmlText = await file.text();
+      } else {
+        throw new Error('Please choose a .kmz or .kml file');
+      }
+      const structures = parseKmlStructures(kmlText);
+      if(!structures.length){
+        status.textContent = '⚠ No structure points found in this file.';
+        toast('No structures found in file','error');
+        return;
+      }
+      S_kmzStructures = structures;
+      populateKmzOptions(structures);
+      document.getElementById('kmzPickerWrap').classList.remove('hidden');
+      status.textContent = '✓ ' + file.name + ' — ' + structures.length + ' structures found. Pick one below.';
+      toast(structures.length + ' structures loaded ✓','success');
+    }catch(err){
+      status.textContent = '✕ ' + (err.message || 'Could not read file');
+      toast('KMZ/KML read failed','error');
+    }
+  });
+}
+
+// Parse KML text → structure placemarks. Prefers the "Structure ID" folder if present,
+// else uses all point placemarks. Returns [{name, lat, lng}].
+function parseKmlStructures(kmlText){
+  let doc;
+  try{
+    doc = new DOMParser().parseFromString(kmlText, 'application/xml');
+  }catch(e){ return []; }
+  if(doc.getElementsByTagName('parsererror').length) {
+    // fall through — some browsers still expose nodes
+  }
+
+  // Helper: extract point placemarks from a container node
+  function placemarksIn(container){
+    const out = [];
+    const pms = container.getElementsByTagName('Placemark');
+    for(let i=0;i<pms.length;i++){
+      const pm = pms[i];
+      const nameEl = pm.getElementsByTagName('name')[0];
+      const name = nameEl ? (nameEl.textContent||'').trim() : '';
+      const pt = pm.getElementsByTagName('Point')[0];
+      if(!name || !pt) continue;
+      const coordEl = pt.getElementsByTagName('coordinates')[0];
+      if(!coordEl) continue;
+      const parts = (coordEl.textContent||'').trim().split(',');
+      const lng = parseFloat(parts[0]);
+      const lat = parseFloat(parts[1]);
+      if(isNaN(lat) || isNaN(lng)) continue;
+      out.push({name, lat, lng});
+    }
+    return out;
+  }
+
+  // Look for a Folder whose <name> is (or contains) "Structure ID"
+  const folders = doc.getElementsByTagName('Folder');
+  let structFolder = null;
+  for(let i=0;i<folders.length;i++){
+    const fn = folders[i].getElementsByTagName('name')[0];
+    const t = fn ? (fn.textContent||'').trim().toLowerCase() : '';
+    if(t === 'structure id' || t.indexOf('structure id') !== -1){ structFolder = folders[i]; break; }
+  }
+
+  let list = structFolder ? placemarksIn(structFolder) : placemarksIn(doc.documentElement || doc);
+
+  // De-dup by name, drop obvious non-structures if we fell back to whole-doc
+  const seen = {};
+  list = list.filter(s=>{
+    if(seen[s.name]) return false;
+    seen[s.name] = true;
+    return true;
+  });
+
+  // Natural sort by name (ST-2 before ST-10)
+  list.sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
+  return list;
+}
+
+function populateKmzOptions(structures){
+  const sel = document.getElementById('kmzSelect');
+  sel.innerHTML = structures.map((s,i)=>
+    '<option value="'+i+'">'+ xmlEscapeAttr(s.name) +'</option>'
+  ).join('');
+  if(structures.length) sel.selectedIndex = 0;
+}
+
+function xmlEscapeAttr(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function filterKmzOptions(){
+  const q = (document.getElementById('kmzSearch').value||'').trim().toLowerCase();
+  const sel = document.getElementById('kmzSelect');
+  const matches = S_kmzStructures
+    .map((s,i)=>({s,i}))
+    .filter(o=>!q || o.s.name.toLowerCase().indexOf(q) !== -1);
+  sel.innerHTML = matches.map(o=>
+    '<option value="'+o.i+'">'+ xmlEscapeAttr(o.s.name) +'</option>'
+  ).join('');
+  if(matches.length) sel.selectedIndex = 0;
+}
+
+async function applyKmzStructure(){
+  const sel = document.getElementById('kmzSelect');
+  if(!sel || sel.selectedIndex < 0){ toast('Pick a structure first','error'); return; }
+  const idx = parseInt(sel.value, 10);
+  const s = S_kmzStructures[idx];
+  if(!s){ toast('Invalid selection','error'); return; }
+
+  // Fill coordinates
+  document.getElementById('inf_lat').value = s.lat.toFixed(6);
+  document.getElementById('inf_lng').value = s.lng.toFixed(6);
+
+  // Fill Structure ID in General Information so cover/purpose/table stay in sync
+  const structEl = document.getElementById('inf_structId');
+  if(structEl) structEl.value = s.name;
+
+  toast('📍 ' + s.name + ' → ' + s.lat.toFixed(6) + ', ' + s.lng.toFixed(6), 'success');
+
+  // Update the preview map, then fetch the static image used in the Word Location Map
+  updateMapFromCoords();
+  try{
+    await fetchStaticMapImage(s.lat, s.lng);
+  }catch(e){ /* fetchStaticMapImage handles its own fallback/toast */ }
 }
 
 /* ── EXTERNAL VIEWS ────────────────────────────────────────── */
@@ -3057,13 +3240,16 @@ function docxPicParagraph(relId, picNum, hasDefect){
   return `<w:p>${pPr}${picRun}${ovalRun}</w:p>`;
 }
 
-function buildCoverPage(b, info){
+function buildCoverPage(b, info, signPic){
   // ── COVER PAGE — matches HSR title block + approval table ──
   const xe = xmlEscape;
   const structId = info.structId || info.bid || '';
   const bname = info.bname || b.name || '';
   const coverDate = info.coverDate || '';
+  // Structure ID is editable via General Information; the surveyed structure name
+  // (building name) is shown alongside it.
   const structLine = 'Structure ID: ' + structId + (bname ? ' (' + bname + ')' : '');
+  signPic = signPic || '';
 
   const bd = '<w:tblBorders>'
     + '<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
@@ -3102,6 +3288,16 @@ function buildCoverPage(b, info){
       + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + (bold?'<w:b/>':'') + '<w:sz w:val="' + (sz||18) + '"/></w:rPr>'
       + '<w:t xml:space="preserve">' + xe(text) + '</w:t></w:r></w:p></w:tc>';
   }
+  // Signature cell: shows the uploaded signature image when available, else blank
+  function sigCell(w){
+    const inner = signPic
+      ? signPic
+      : '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve"></w:t></w:r>';
+    return '<w:tc><w:tcPr><w:tcW w:w="' + w + '" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+      + inner
+      + '</w:p></w:tc>';
+  }
   function apRow(role, name, title, date){
     // two stacked lines in the name cell
     const nameCell = '<w:tc><w:tcPr><w:tcW w:w="3400" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
@@ -3112,7 +3308,7 @@ function buildCoverPage(b, info){
     return '<w:tr><w:trPr><w:trHeight w:val="700" w:hRule="atLeast"/></w:trPr>'
       + apCell(role, 2600, true)
       + nameCell
-      + apCell('', 2400)
+      + sigCell(2400)
       + apCell(date, 2000, false)
       + '</w:tr>';
   }
@@ -3182,7 +3378,7 @@ function buildDocControlPage(info){
 function buildInfoPage(b, info, ents){
   // ── Helpers ──────────────────────────────────────────────
   function infoRow(label, value){
-    return '<w:tr><w:trPr><w:trHeight w:val="380" w:hRule="atLeast"/></w:trPr>'
+    return '<w:tr><w:trPr><w:trHeight w:val="230" w:hRule="atLeast"/></w:trPr>'
       + docxCell(docxPara([{text:label,bold:true,size:18,color:'1F3864'}]),{width:3800,shading:'D9E2F3'})
       + docxCell(docxPara([{text:value||'—',size:18}]),{width:6600})
       + '</w:tr>';
@@ -3212,15 +3408,18 @@ function buildInfoPage(b, info, ents){
 
   // ── PURPOSE paragraph (section 2) ────────────────────────
   const purposeHeading = docxPara([{text:'2. PURPOSE',bold:true,size:24,color:'1F3864'}]);
-  const structRef = info.structId || info.bid || '';
-  const bnameRef = info.bname || b.name || '';
+  // Building ID = the current building (info.bid / info.bname / building name); Structure ID = info.structId
+  const buildingIdRef = info.bid || info.bname || b.name || '';
+  const structIdRef   = info.structId || '';
+  const bnameRef      = info.bname || b.name || '';
   const purposeText = '<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>'
     + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
     + '<w:t xml:space="preserve">A condition survey shall be undertaken on structures located within the zone of influence of shafts and tunnels of the '
     + xmlEscape(info.project||'UAE High Speed Rail (HSR) Project')
     + ' before and after the construction activities. This document comprises the pre-construction condition survey of building ID: '
-    + xmlEscape(structRef)
+    + xmlEscape(buildingIdRef)
     + (bnameRef ? ', (' + xmlEscape(bnameRef) + ')' : '')
+    + (structIdRef ? ', Structure ID: ' + xmlEscape(structIdRef) : '')
     + ' located within the zone of influence of the same project.</w:t></w:r></w:p>';
 
   // ── GENERAL INFORMATION table (section 3) ────────────────
@@ -3976,6 +4175,10 @@ async function buildWordForBuilding(buildingId, progressCb){
   let ftrLogoLeftPic   = '';
   let ftrLogoRightPic  = '';
 
+  // Cover approval signature logo (optional, user-uploaded under pcs.logo.sign)
+  let coverSignRel = '';
+  let coverSignPic = '';
+
   function makePicXml(relId, picId, picName, wEmu, hEmu){
     return '<w:r><w:rPr/><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
       + '<wp:extent cx="' + wEmu + '" cy="' + hEmu + '"/>'
@@ -4009,6 +4212,17 @@ async function buildWordForBuilding(buildingId, progressCb){
   if(hdrLogoRightRel)  hdrLogoRightPic  = makePicXml('rIdLogoR', 9002, 'LogoRight',  Math.round(3.8*360000), Math.round(1.2*360000));
   if(hdrLogoCentreRel) hdrLogoCentrePic = makePicXml('rIdLogoC', 9003, 'LogoCentre', Math.round(5.5*360000), Math.round(1.5*360000));
 
+  // Cover signature logo → document body media (goes in document.xml.rels, not header rels)
+  const signB64 = getLogoBase64('sign');
+  if(signB64){
+    const signData  = signB64.split(',')[1];
+    const signExt   = signB64.startsWith('data:image/png') ? 'png' : 'jpg';
+    const signFname = 'sign_logo.' + signExt;
+    zip.file('word/media/' + signFname, signData, {base64:true});
+    coverSignRel = '<Relationship Id="rIdSignLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/' + signFname + '"/>';
+    coverSignPic = makePicXml('rIdSignLogo', 9100, 'CoverSignature', Math.round(2.6*360000), Math.round(1.0*360000));
+  }
+
   // Footer logos removed per request — logos are used in the header only.
   // No footer logo image, relationship, or picture is generated.
   ftrLogoLeftRel  = '';
@@ -4033,22 +4247,22 @@ async function buildWordForBuilding(buildingId, progressCb){
     + ' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
     + ' mc:Ignorable="wps">'
     + '<w:tbl>'
-    + '<w:tblPr><w:tblW w:w="9638" w:type="dxa"/>'
+    + '<w:tblPr><w:tblW w:w="10400" w:type="dxa"/>'
     + '<w:tblBorders>'
     + '<w:bottom w:val="single" w:sz="6" w:color="1F3864"/>'
     + '</w:tblBorders>'
     + '<w:tblLayout w:type="fixed"/>'
     + '<w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar>'
     + '</w:tblPr>'
-    + '<w:tblGrid><w:gridCol w:w="2800"/><w:gridCol w:w="4038"/><w:gridCol w:w="2800"/></w:tblGrid>'
+    + '<w:tblGrid><w:gridCol w:w="2900"/><w:gridCol w:w="4600"/><w:gridCol w:w="2900"/></w:tblGrid>'
     + '<w:tr><w:trPr><w:trHeight w:val="850" w:hRule="atLeast"/></w:trPr>'
     // Left cell
-    + '<w:tc><w:tcPr><w:tcW w:w="2800" w:type="dxa"/><w:tcBorders><w:bottom w:val="none"/></w:tcBorders><w:vAlign w:val="center"/></w:tcPr>'
+    + '<w:tc><w:tcPr><w:tcW w:w="2900" w:type="dxa"/><w:tcBorders><w:bottom w:val="none"/></w:tcBorders><w:vAlign w:val="center"/></w:tcPr>'
     + '<w:p><w:pPr><w:jc w:val="left"/><w:spacing w:before="0" w:after="0"/></w:pPr>'
     + (hdrLogoLeftPic || '<w:r><w:t></w:t></w:r>')
     + '</w:p></w:tc>'
     // Centre cell
-    + '<w:tc><w:tcPr><w:tcW w:w="4038" w:type="dxa"/><w:tcBorders><w:bottom w:val="none"/></w:tcBorders><w:vAlign w:val="center"/></w:tcPr>'
+    + '<w:tc><w:tcPr><w:tcW w:w="4600" w:type="dxa"/><w:tcBorders><w:bottom w:val="none"/></w:tcBorders><w:vAlign w:val="center"/></w:tcPr>'
     + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="0"/></w:pPr>'
     + (hdrLogoCentrePic
         ? hdrLogoCentrePic
@@ -4061,7 +4275,7 @@ async function buildWordForBuilding(buildingId, progressCb){
         : '')
     + '</w:tc>'
     // Right cell
-    + '<w:tc><w:tcPr><w:tcW w:w="2800" w:type="dxa"/><w:tcBorders><w:bottom w:val="none"/></w:tcBorders><w:vAlign w:val="center"/></w:tcPr>'
+    + '<w:tc><w:tcPr><w:tcW w:w="2900" w:type="dxa"/><w:tcBorders><w:bottom w:val="none"/></w:tcBorders><w:vAlign w:val="center"/></w:tcPr>'
     + '<w:p><w:pPr><w:jc w:val="right"/><w:spacing w:before="0" w:after="0"/></w:pPr>'
     + (hdrLogoRightPic || '<w:r><w:t></w:t></w:r>')
     + '</w:p></w:tc>'
@@ -4084,7 +4298,7 @@ async function buildWordForBuilding(buildingId, progressCb){
     + '</w:r></w:p>'
     // Line 2: Doc ref left | logo centre | Page X of Y right
     + '<w:p><w:pPr><w:jc w:val="left"/><w:spacing w:before="0" w:after="0"/>'
-    + '<w:tabs><w:tab w:val="right" w:pos="9638"/></w:tabs></w:pPr>'
+    + '<w:tabs><w:tab w:val="right" w:pos="10400"/></w:tabs></w:pPr>'
     + '<w:r><w:rPr><w:sz w:val="16"/></w:rPr><w:t xml:space="preserve">' + xmlEscape(ftrDocRef) + '   </w:t></w:r>'
     + (ftrLogoLeftPic  ? ftrLogoLeftPic  : '')
     + (ftrLogoRightPic ? ftrLogoRightPic : '')
@@ -4140,6 +4354,7 @@ async function buildWordForBuilding(buildingId, progressCb){
     + (ftrLogoRightRel  ? '\n' + ftrLogoRightRel  : '')
     + imgRels
     + (extImgRels ? '\n' + extImgRels : '')
+    + (coverSignRel ? '\n' + coverSignRel : '')
     + (mapOpts.mapRelId ? '\n<Relationship Id="' + mapOpts.mapRelId + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/' + mapOpts.mapFname + '"/>' : '')
     + '</Relationships>');
 
@@ -4150,7 +4365,7 @@ async function buildWordForBuilding(buildingId, progressCb){
   const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
 
   // ── Page 1: Cover page ──────────────────────────────────
-  const coverPage = buildCoverPage(b, info);
+  const coverPage = buildCoverPage(b, info, coverSignPic);
 
   // ── Page 2: Document control ────────────────────────────
   const docControlPage = buildDocControlPage(info);
@@ -4620,6 +4835,10 @@ function escapeAttr(s){ return escapeHtml(s); }
   setupLogoInput('left');
   setupLogoInput('right');
   setupLogoInput('centre');
+  setupLogoInput('sign');
+  loadLogoPreview('centre');
+  loadLogoPreview('sign');
+  setupKmzInput();
 
   // Initialize external view slots (load persisted photos if a building is active)
   await loadExtPhotos();
