@@ -889,6 +889,43 @@ Additional concerns noted include roof seepage and damage, window/door misalignm
         <button onclick="updateMapFromCoords()" style="width:100%;padding:11px;background:var(--navy);color:#fff;border:0;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;margin-top:2px">
           🗺 Update Map from Coordinates
         </button>
+
+        <!-- HSR v3.5: UTM 40R location + dynamic building corner coordinates -->
+        <div style="background:#EEF3FB;padding:12px;border-radius:10px;margin-top:12px;border:1px solid #C8D6EA">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+            <label style="margin:0;font-weight:800;color:var(--navy)">📐 Building Location Coordinate</label>
+            <span style="font-size:11px;font-weight:800;background:#1F3864;color:#fff;padding:4px 7px;border-radius:999px">UTM 40R</span>
+          </div>
+          <button onclick="pickBuildingLocationCoordinate()" id="utmLocBtn" style="width:100%;padding:11px;background:linear-gradient(135deg,#1F3864,#305C9A);color:#fff;border:0;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:8px">
+            📍 Pick Building Location Coordinate (GPS)
+          </button>
+          <div class="coord-row">
+            <div>
+              <label>Easting (m E)</label>
+              <input type="text" id="inf_utmE" readonly placeholder="e.g. 324242.62" style="background:#fff">
+            </div>
+            <div>
+              <label>Northing (m N)</label>
+              <input type="text" id="inf_utmN" readonly placeholder="e.g. 2781063.07" style="background:#fff">
+            </div>
+          </div>
+          <div id="utmLocAccuracy" style="font-size:11px;color:var(--g3);margin-top:3px">Coordinate system: WGS84 / UTM Zone 40N, latitude band R (UTM 40R).</div>
+        </div>
+
+        <div style="background:#FFF8E8;padding:12px;border-radius:10px;margin-top:12px;border:1px solid #F0D49A">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+            <label style="margin:0;font-weight:800;color:#7A4A00">📍 Building Corner Coordinates</label>
+            <span id="cornerPointCount" style="font-size:11px;font-weight:800;background:#A86700;color:#fff;padding:4px 7px;border-radius:999px">0 / 12</span>
+          </div>
+          <div style="font-size:11px;color:var(--g3);margin-bottom:8px">Walk to each building corner and tap <strong>Pick Next Corner</strong>. Points are numbered automatically P1 to P12.</div>
+          <button onclick="pickNextCornerCoordinate()" id="cornerPickBtn" style="width:100%;padding:11px;background:#A86700;color:#fff;border:0;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer">
+            ➕ Pick Next Corner (P1)
+          </button>
+          <div id="cornerPointsList" style="margin-top:8px"></div>
+          <button onclick="clearCornerCoordinates()" id="cornerClearBtn" style="width:100%;padding:8px;background:#F2F2F2;color:#555;border:1px solid #D0D0D0;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;margin-top:6px">
+            🗑 Clear All Corner Points
+          </button>
+        </div>
       </div>
 
       <div style="padding:0 10px 10px;margin-top:10px">
@@ -1529,6 +1566,8 @@ const S = {
   extCount: 4,
   extSlots: [],    // [{dir, photoBlob, photoMeta, label}]
   extActiveSlot: -1,
+  // HSR v3.5 location coordinates (UTM 40R)
+  cornerPoints: [],  // [{lat,lng,easting,northing,accuracy}] up to P12
 };
 
 /* ── GENERAL INFO STATE ────────────────────────────────────── */
@@ -1564,6 +1603,9 @@ function saveGeneralInfo(){
     contact:   document.getElementById('inf_contact').value.trim(),
     lat:       document.getElementById('inf_lat').value.trim(),
     lng:       document.getElementById('inf_lng').value.trim(),
+    utmE:      (document.getElementById('inf_utmE')||{}).value ? document.getElementById('inf_utmE').value.trim() : '',
+    utmN:      (document.getElementById('inf_utmN')||{}).value ? document.getElementById('inf_utmN').value.trim() : '',
+    cornerPoints: (S.cornerPoints||[]).slice(0,12),
   };
   localStorage.setItem(INFO_KEY, JSON.stringify(data));
   toast('General information saved ✓','success');
@@ -1575,12 +1617,17 @@ function loadGeneralInfo(){
     if(!data) return;
     const fields = ['project','client','consultant','contractor','service','bid','bname','makani',
       'plot','address','date','type','levels','basements','age','dim','foundation','structure',
-      'distance','surveyor','rep','summary','structId','coverDate','intro','owner','contact','lat','lng'];
+      'distance','surveyor','rep','summary','structId','coverDate','intro','owner','contact','lat','lng','utmE','utmN'];
     fields.forEach(k=>{
       const el = document.getElementById('inf_'+k);
       if(el && data[k]) el.value = data[k];
     });
-    if(data.lat && data.lng) updateMapFromCoords();
+    S.cornerPoints = Array.isArray(data.cornerPoints) ? data.cornerPoints.slice(0,12) : [];
+    renderCornerPoints();
+    if(data.lat && data.lng){
+      syncBuildingUtmFromLatLng();
+      updateMapFromCoords();
+    }
   }catch(e){}
 }
 
@@ -1696,6 +1743,139 @@ function fillCoordsFromPaste(){
   document.getElementById('inf_paste').value = '';
   toast('Coordinates filled: ' + lat.toFixed(6) + ', ' + lng.toFixed(6), 'success');
   updateMapFromCoords();
+}
+
+/* ── HSR v3.5 UTM 40R COORDINATES ─────────────────────────── */
+// WGS84 geographic coordinates -> fixed UTM Zone 40 (northern hemisphere).
+// Dubai is in latitude band R, therefore the project display is UTM 40R.
+function wgs84ToUtm40R(lat, lng){
+  lat = Number(lat); lng = Number(lng);
+  if(!isFinite(lat) || !isFinite(lng)) return null;
+  const a = 6378137.0;
+  const eccSquared = 0.0066943799901413165;
+  const k0 = 0.9996;
+  const zoneNumber = 40;
+  const longOrigin = (zoneNumber - 1) * 6 - 180 + 3; // 57°E
+  const latRad = lat * Math.PI / 180;
+  const longRad = lng * Math.PI / 180;
+  const longOriginRad = longOrigin * Math.PI / 180;
+  const eccPrimeSquared = eccSquared / (1 - eccSquared);
+  const N = a / Math.sqrt(1 - eccSquared * Math.sin(latRad) * Math.sin(latRad));
+  const T = Math.tan(latRad) * Math.tan(latRad);
+  const C = eccPrimeSquared * Math.cos(latRad) * Math.cos(latRad);
+  const A = Math.cos(latRad) * (longRad - longOriginRad);
+  const M = a * (
+      (1 - eccSquared/4 - 3*eccSquared*eccSquared/64 - 5*eccSquared*eccSquared*eccSquared/256) * latRad
+    - (3*eccSquared/8 + 3*eccSquared*eccSquared/32 + 45*eccSquared*eccSquared*eccSquared/1024) * Math.sin(2*latRad)
+    + (15*eccSquared*eccSquared/256 + 45*eccSquared*eccSquared*eccSquared/1024) * Math.sin(4*latRad)
+    - (35*eccSquared*eccSquared*eccSquared/3072) * Math.sin(6*latRad)
+  );
+  let easting = k0 * N * (A + (1-T+C)*Math.pow(A,3)/6
+    + (5 - 18*T + T*T + 72*C - 58*eccPrimeSquared)*Math.pow(A,5)/120) + 500000.0;
+  let northing = k0 * (M + N*Math.tan(latRad)*(A*A/2
+    + (5 - T + 9*C + 4*C*C)*Math.pow(A,4)/24
+    + (61 - 58*T + T*T + 600*C - 330*eccPrimeSquared)*Math.pow(A,6)/720));
+  if(lat < 0) northing += 10000000.0;
+  return {zone:'40R', easting, northing};
+}
+
+function syncBuildingUtmFromLatLng(){
+  const latEl=document.getElementById('inf_lat'), lngEl=document.getElementById('inf_lng');
+  const eEl=document.getElementById('inf_utmE'), nEl=document.getElementById('inf_utmN');
+  if(!latEl || !lngEl || !eEl || !nEl) return null;
+  const utm=wgs84ToUtm40R(parseFloat(latEl.value),parseFloat(lngEl.value));
+  if(!utm){ eEl.value=''; nEl.value=''; return null; }
+  eEl.value=utm.easting.toFixed(2);
+  nEl.value=utm.northing.toFixed(2);
+  return utm;
+}
+
+function gpsPointOnce(success, failure){
+  if(!navigator.geolocation){ if(failure) failure({message:'GPS not available'}); return; }
+  navigator.geolocation.getCurrentPosition(success, failure, {enableHighAccuracy:true, timeout:20000, maximumAge:0});
+}
+
+function pickBuildingLocationCoordinate(){
+  const btn=document.getElementById('utmLocBtn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Picking building location...';}
+  gpsPointOnce(async pos=>{
+    const lat=pos.coords.latitude, lng=pos.coords.longitude;
+    document.getElementById('inf_lat').value=lat.toFixed(6);
+    document.getElementById('inf_lng').value=lng.toFixed(6);
+    const utm=syncBuildingUtmFromLatLng();
+    const a=document.getElementById('utmLocAccuracy');
+    if(a) a.textContent='UTM 40R • GPS accuracy ±'+Math.round(pos.coords.accuracy||0)+' m';
+    if(btn){btn.disabled=false;btn.textContent='✅ Building Location Captured';}
+    updateMapFromCoords();
+    try{ await fetchStaticMapImage(lat,lng); }catch(e){}
+    toast(utm ? ('Building location: E '+utm.easting.toFixed(2)+' / N '+utm.northing.toFixed(2)) : 'Building location captured','success');
+  },err=>{
+    if(btn){btn.disabled=false;btn.textContent='📍 Pick Building Location Coordinate (GPS)';}
+    toast(err && err.code===1 ? 'Permission denied — allow location access' : 'Could not capture building location','error');
+  });
+}
+
+function renderCornerPoints(){
+  const list=document.getElementById('cornerPointsList');
+  const count=document.getElementById('cornerPointCount');
+  const btn=document.getElementById('cornerPickBtn');
+  const pts=(S.cornerPoints||[]).slice(0,12);
+  if(count) count.textContent=pts.length+' / 12';
+  if(btn){
+    btn.disabled=pts.length>=12;
+    btn.textContent=pts.length>=12 ? '✓ Maximum 12 Corner Points Captured' : '➕ Pick Next Corner (P'+(pts.length+1)+')';
+  }
+  if(!list) return;
+  if(!pts.length){
+    list.innerHTML='<div style="font-size:11px;color:var(--g3);padding:8px 2px">No corner points captured yet.</div>';
+    return;
+  }
+  list.innerHTML=pts.map((p,i)=>{
+    const acc=isFinite(Number(p.accuracy)) ? (' • ±'+Math.round(Number(p.accuracy))+' m GPS') : '';
+    return '<div style="display:flex;align-items:center;gap:7px;background:#fff;border:1px solid #E4D3AD;border-radius:8px;padding:8px;margin-top:6px">'
+      + '<div style="min-width:30px;font-weight:900;color:#7A4A00">P'+(i+1)+'</div>'
+      + '<div style="flex:1;font-size:12px"><strong>E '+Number(p.easting).toFixed(2)+'</strong> m &nbsp; <strong>N '+Number(p.northing).toFixed(2)+'</strong> m'
+      + '<div style="font-size:10px;color:var(--g3);margin-top:2px">UTM 40R'+acc+'</div></div>'
+      + '<button onclick="removeCornerCoordinate('+i+')" style="border:0;background:#FDECEC;color:#B3261E;border-radius:7px;padding:6px 8px;font-weight:800;cursor:pointer">✕</button>'
+      + '</div>';
+  }).join('');
+}
+
+function pickNextCornerCoordinate(){
+  if(!Array.isArray(S.cornerPoints)) S.cornerPoints=[];
+  if(S.cornerPoints.length>=12){ toast('Maximum 12 corner points allowed','error'); return; }
+  const btn=document.getElementById('cornerPickBtn');
+  const next=S.cornerPoints.length+1;
+  if(btn){btn.disabled=true;btn.textContent='⏳ Picking P'+next+'...';}
+  gpsPointOnce(pos=>{
+    const lat=pos.coords.latitude, lng=pos.coords.longitude;
+    const utm=wgs84ToUtm40R(lat,lng);
+    if(!utm){ if(btn) btn.disabled=false; toast('Could not convert GPS coordinate','error'); return; }
+    S.cornerPoints.push({
+      lat:Number(lat.toFixed(8)), lng:Number(lng.toFixed(8)),
+      easting:Number(utm.easting.toFixed(2)), northing:Number(utm.northing.toFixed(2)),
+      accuracy:Number((pos.coords.accuracy||0).toFixed(1))
+    });
+    renderCornerPoints();
+    toast('P'+next+' captured: E '+utm.easting.toFixed(2)+' / N '+utm.northing.toFixed(2),'success');
+  },err=>{
+    if(btn){btn.disabled=false;btn.textContent='➕ Pick Next Corner (P'+next+')';}
+    toast(err && err.code===1 ? 'Permission denied — allow location access' : 'Could not capture corner point','error');
+  });
+}
+
+function removeCornerCoordinate(index){
+  if(!Array.isArray(S.cornerPoints)) return;
+  S.cornerPoints.splice(index,1);
+  renderCornerPoints();
+}
+
+function clearCornerCoordinates(){
+  if(!Array.isArray(S.cornerPoints) || !S.cornerPoints.length){ renderCornerPoints(); return; }
+  if(!confirm('Clear all building corner coordinates?')) return;
+  S.cornerPoints=[];
+  renderCornerPoints();
+  toast('Corner coordinates cleared','info');
 }
 
 /* ── GPS LOCATION ──────────────────────────────────────────── */
@@ -1913,6 +2093,7 @@ async function fetchTileBasedMap(lat, lng, zoom){
 function updateMapFromCoords(){
   const lat = parseFloat(document.getElementById('inf_lat').value);
   const lng = parseFloat(document.getElementById('inf_lng').value);
+  syncBuildingUtmFromLatLng();
   if(isNaN(lat)||isNaN(lng)){ toast('Enter valid coordinates first','error'); return; }
   const d = 0.003;
   const frame = document.getElementById('mapFrame');
@@ -3485,7 +3666,7 @@ function buildDocControlPage(info){
 }
 
 
-/* ===== HSR FINAL REPORT v3.4 - ST-260 HEADER/FOOTER + SECTIONS 1-3 (report export only) ===== */
+/* ===== HSR FINAL REPORT v3.5 - UTM 40R LOCATION CAPTURE + v3.4 REPORT BASE (report export only) ===== */
 function reportClean(v){ return String(v==null?'':v).replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim(); }
 function normalizeElevationV33(v){
   const s=reportClean(v).replace(/\bSide\b/ig,'').trim().toLowerCase().replace(/-/g,' ');
@@ -3796,8 +3977,18 @@ function buildLocationPage(info, opts={}){
   const heading=docxPara([{text:'8. Location Map/ Footprint Sketch',bold:true,size:24,color:'1F3864'}]);
   const bd='<w:tblBorders><w:top w:val="single" w:color="1F3864" w:sz="4"/><w:left w:val="single" w:color="1F3864" w:sz="4"/><w:bottom w:val="single" w:color="1F3864" w:sz="4"/><w:right w:val="single" w:color="1F3864" w:sz="4"/><w:insideH w:val="single" w:color="1F3864" w:sz="4"/><w:insideV w:val="single" w:color="1F3864" w:sz="4"/></w:tblBorders>';
   const pr='<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'+bd+'<w:tblLayout w:type="autofit"/></w:tblPr>'; const grid='<w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="7400"/></w:tblGrid>';
-  function row(label,value,first=false){ const fill='D9E2F3'; return '<w:tr><w:trPr><w:trHeight w:val="215" w:hRule="atLeast"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:fill="'+fill+'"/><w:tcMar><w:top w:w="25" w:type="dxa"/><w:left w:w="45" w:type="dxa"/><w:bottom w:w="25" w:type="dxa"/><w:right w:w="45" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:label,bold:true,size:15}],{align:'left'})+'</w:tc><w:tc><w:tcPr><w:tcW w:w="7400" w:type="dxa"/>'+(first?'<w:shd w:fill="'+fill+'"/>':'')+'<w:tcMar><w:top w:w="25" w:type="dxa"/><w:left w:w="45" w:type="dxa"/><w:bottom w:w="25" w:type="dxa"/><w:right w:w="45" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:value||'—',bold:first,size:15}],{align:'left'})+'</w:tc></w:tr>'; }
-  const sid=reportClean(info.structId||info.bid||''); let rows=''; rows+=row('Structure Number',sid,true); rows+=row('Building ID/Name:',info.bname||info.bid); rows+=row('Address',info.address); rows+=row('Building Location Coordinates:','Latitude: '+(info.lat||'—')+'    Longitude: '+(info.lng||'—')); rows+=row('Building Corner Coordinates '+sid,'P1: —    P2: —\nP3: —    P4: —'); rows+=row('Between Chainage','—'); const tbl='<w:tbl>'+pr+grid+rows+'</w:tbl>';
+  function row(label,value,first=false){ const fill='D9E2F3'; const vp=String(value||'—').split('\n').map(line=>docxPara([{text:line,bold:first,size:15}],{align:'left'})).join(''); return '<w:tr><w:trPr><w:trHeight w:val="215" w:hRule="atLeast"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:fill="'+fill+'"/><w:tcMar><w:top w:w="25" w:type="dxa"/><w:left w:w="45" w:type="dxa"/><w:bottom w:w="25" w:type="dxa"/><w:right w:w="45" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:label,bold:true,size:15}],{align:'left'})+'</w:tc><w:tc><w:tcPr><w:tcW w:w="7400" w:type="dxa"/>'+(first?'<w:shd w:fill="'+fill+'"/>':'')+'<w:tcMar><w:top w:w="25" w:type="dxa"/><w:left w:w="45" w:type="dxa"/><w:bottom w:w="25" w:type="dxa"/><w:right w:w="45" w:type="dxa"/></w:tcMar></w:tcPr>'+vp+'</w:tc></w:tr>'; }
+  const sid=reportClean(info.structId||info.bid||'');
+  let locUtmE=Number(info.utmE), locUtmN=Number(info.utmN);
+  if((!isFinite(locUtmE)||!isFinite(locUtmN)) && info.lat && info.lng){ const u=wgs84ToUtm40R(Number(info.lat),Number(info.lng)); if(u){locUtmE=u.easting;locUtmN=u.northing;} }
+  const locCoord=(isFinite(locUtmE)&&isFinite(locUtmN)) ? ('Easting: '+locUtmE.toFixed(2)+' m E    Northing: '+locUtmN.toFixed(2)+' m N') : '—';
+  const cornerPts=Array.isArray(info.cornerPoints)?info.cornerPoints.slice(0,12):[];
+  let cornerCoord='—';
+  if(cornerPts.length){
+    const parts=cornerPts.map((p,i)=>'P'+(i+1)+': '+Number(p.easting).toFixed(2)+' m E, '+Number(p.northing).toFixed(2)+' m N');
+    const lines=[]; for(let i=0;i<parts.length;i+=2) lines.push(parts.slice(i,i+2).join('    ')); cornerCoord=lines.join('\n');
+  }
+  let rows=''; rows+=row('Structure Number',sid,true); rows+=row('Building ID/Name:',info.bname||info.bid); rows+=row('Address',info.address); rows+=row('Building Location Coordinates:',locCoord); rows+=row('Building Corner Coordinates '+sid,cornerCoord); rows+=row('Between Chainage','—'); const tbl='<w:tbl>'+pr+grid+rows+'</w:tbl>';
   let img=''; if(opts.mapRelId){ const W=Math.round(14.5*360000),H=Math.round(9*360000); img='<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="60"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="'+W+'" cy="'+H+'"/><wp:docPr id="8001" name="LocationMap"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="LocationMap"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="'+opts.mapRelId+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+W+'" cy="'+H+'"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'; } else img=docxPara([{text:'[Map image not available - update location section before submission]',size:17,color:'777777'}],{align:'center'});
   const mapLink=docxPara([{text:'Map link: https://maps.google.com/?q='+(info.lat||'')+','+(info.lng||''),size:17}],{align:'left'}); const zone=docxPara([{text:'Tunnel Alignment Centre Line / Zone of Influence @30m',bold:true,size:17}],{align:'left'});
   return heading+'<w:p/>'+tbl+'<w:p/>'+img+mapLink+zone;
@@ -3861,7 +4052,7 @@ async function buildWordForBuilding(buildingId, progressCb){
   zip.file('docProps/core.xml',`<?xml version="1.0" encoding="utf-8"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
 <dc:title>PCS Survey - ${xmlEscape(b.name)}</dc:title>
-<dc:creator>PCS Survey App - HSR Final Report v3.3</dc:creator>
+<dc:creator>PCS Survey App - HSR Final Report v3.5</dc:creator>
 </cp:coreProperties>`);
   zip.file('docProps/app.xml',`<?xml version="1.0" encoding="utf-8"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
