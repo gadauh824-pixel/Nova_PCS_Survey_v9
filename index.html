@@ -3484,304 +3484,188 @@ function buildDocControlPage(info){
   return heading + gap + issuedLine + gap + revTbl;
 }
 
+
+/* ===== HSR FINAL REPORT v3.3 COMPATIBILITY (report export only) ===== */
+function reportClean(v){ return String(v==null?'':v).replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim(); }
+function normalizeElevationV33(v){
+  const s=reportClean(v).replace(/\bSide\b/ig,'').trim().toLowerCase().replace(/-/g,' ');
+  const map={'north east':'Northeast','northeast':'Northeast','south east':'Southeast','southeast':'Southeast','north west':'Northwest','northwest':'Northwest','south west':'Southwest','southwest':'Southwest','north':'North','south':'South','east':'East','west':'West'};
+  return map[s] || (s ? smartTitleCase(s) : 'Unknown');
+}
+function measuredWidthV33(cond){ const m=reportClean(cond).match(/Width\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*mm/i); return m?parseFloat(m[1]):null; }
+function damageClassV33(width){
+  if(width < 0.1) return ['0','Negligible'];
+  if(width <= 1.0) return ['1','Very Slight'];
+  if(width <= 5.0) return ['2','Slight'];
+  if(width <= 15.0) return ['3','Moderate'];
+  if(width <= 25.0) return ['4','Severe'];
+  return ['5','Very Severe'];
+}
+function categoryIntV33(cat){ const a=String(cat||'').match(/\d+/g)||['0']; return Math.max(...a.map(Number)); }
+function categoryDegreeV33(n){ return ({0:'Negligible',1:'Very Slight',2:'Slight',3:'Moderate',4:'Severe',5:'Very Severe'})[n]||''; }
+function isZoomEntryV33(e){ return /crack\s*zoom/i.test(reportClean(e.description)); }
+function crackDescV33(e){
+  const loc=reportClean(e.description).replace(/\s+View$/i,''); const low=loc.toLowerCase(); const dlow=reportClean(e.condition).toLowerCase();
+  if(low.includes('inner boundary')) return 'Inner boundary wall - crack';
+  if((low.includes('paint')&&low.includes('crack'))||(dlow.includes('paint')&&dlow.includes('crack'))) return 'Outer wall - paint peel-off with wall crack';
+  if(low.includes('outer wall')) return 'Outer wall - wall crack';
+  if(loc){ const base=reportClean(loc.replace(/\bcrack\b/ig,'')).replace(/^[- ]+|[- ]+$/g,''); return base ? base+' - wall crack' : 'Wall crack'; }
+  return 'Wall crack';
+}
+function buildV7CracksV33(ents){
+  const ordered=[...(ents||[])].sort((a,b)=>(Number(a.photoId)||0)-(Number(b.photoId)||0));
+  const cracks=new Map(); let prevBase=null;
+  // Base observations, including measured cracks that are not zoom cards.
+  for(const e of ordered){
+    if(isZoomEntryV33(e)) continue;
+    if(isDefect(e.condition) && /crack/i.test(e.condition||'')){
+      const pid=pad3(e.photoId); const rec={pictureId:pid,elevation:normalizeElevationV33(e.location||e.direction),description:crackDescV33(e),width:null,measured:false,category:'0-1',degree:'Negligible-Very Slight'};
+      const w=measuredWidthV33(e.condition); if(w!=null){ const [c,d]=damageClassV33(w); rec.width=w; rec.measured=true; rec.category=c; rec.degree=d; }
+      cracks.set(pid,rec); prevBase=e;
+    } else if(isDefect(e.condition) || e.photoId){ prevBase=null; }
+  }
+  // Measured zoom cards upgrade the immediately preceding crack on the same elevation.
+  prevBase=null;
+  for(const e of ordered){
+    if(!isZoomEntryV33(e)){
+      if(isDefect(e.condition)&&/crack/i.test(e.condition||'')) prevBase=e; else if(e.photoId) prevBase=null;
+      continue;
+    }
+    const w=measuredWidthV33(e.condition); if(w==null || !isDefect(e.condition) || !/crack/i.test(e.condition||'')) continue;
+    const zoomElev=normalizeElevationV33(e.location||e.direction); let baseId=pad3(e.photoId); let base=e;
+    if(prevBase && normalizeElevationV33(prevBase.location||prevBase.direction)===zoomElev){ baseId=pad3(prevBase.photoId); base=prevBase; }
+    if(!cracks.has(baseId)) cracks.set(baseId,{pictureId:baseId,elevation:normalizeElevationV33(base.location||base.direction),description:crackDescV33(base),width:null,measured:false,category:'0-1',degree:'Negligible-Very Slight'});
+    const [c,d]=damageClassV33(w); Object.assign(cracks.get(baseId),{width:w,measured:true,category:c,degree:d});
+  }
+  const order={South:0,East:1,West:2,North:3,Northeast:4,Southeast:5,Northwest:6,Southwest:7};
+  return [...cracks.values()].sort((a,b)=>(order[a.elevation]??99)-(order[b.elevation]??99) || Number(a.pictureId)-Number(b.pictureId));
+}
+function standardNonCrackLabelV33(cond){
+  const s=reportClean(cond).replace(/\s+D\d+\b/ig,'').toLowerCase();
+  if(!s || s==='n/a' || s==='na' || s.includes('crack')) return null;
+  if(s.includes('concrete') && /damage|damaged/.test(s)) return 'Concrete Damage';
+  if(s.includes('plaster') && /damage|damaged/.test(s)) return 'Plaster Damage';
+  if(s.includes('paint') && /peel|peel-off/.test(s)) return 'Paint Peel Off';
+  if(s.includes('tile') && /damage|damaged/.test(s)) return 'Tiles Damaged';
+  if(/discolou?r/.test(s)) return 'Discolouration';
+  const generic=reportClean(String(cond||'').replace(/\s*[-()]?\s*D?\d+(?:\s*[-/]\s*D?\d+)?\s*\)?$/i,''));
+  return generic || null;
+}
+function buildV7NonCracksV33(ents){
+  const out=[]; const seen=new Set();
+  for(const e of ents||[]){ const label=standardNonCrackLabelV33(e.condition); if(!label) continue; const pid=pad3(e.photoId); const k=label+'|'+pid; if(seen.has(k)) continue; seen.add(k); out.push({label,pictureId:pid,elevation:normalizeElevationV33(e.location||e.direction)}); }
+  return out;
+}
+function groupV7NonCracksV33(items){
+  const order=['Concrete Damage','Plaster Damage','Paint Peel Off','Tiles Damaged','Discolouration']; const m={};
+  for(const x of items){ if(!m[x.label]) m[x.label]={ids:[],elevations:new Set()}; m[x.label].ids.push(x.pictureId); m[x.label].elevations.add(x.elevation); }
+  const labels=[...order.filter(x=>m[x]), ...Object.keys(m).filter(x=>!order.includes(x)).sort()]; return labels.map(label=>[label,m[label]]);
+}
+function significantCrackSentenceV33(cracks){
+  const measured=cracks.filter(c=>c.measured&&c.width!=null); if(!measured.length) return 'Remaining cracks are predominantly visual hairline cracks (< 1.0 mm, Category 0-1).';
+  const sig=measured.filter(c=>c.width>=5.0); if(!sig.length) return 'Measured cracks are up to 1.0 mm; remaining cracks are predominantly visual hairline cracks (Category 0-1).';
+  const by={}; for(const c of sig){ (by[c.width]||(by[c.width]=[])).push(c); } const words={1:'one',2:'two',3:'three',4:'four',5:'five',6:'six',7:'seven',8:'eight',9:'nine',10:'ten'};
+  const p2=Object.keys(by).map(Number).sort((a,b)=>b-a).map(w=>{ const cs=by[w]; const ids=cs.map(c=>c.pictureId+' '+c.elevation).join(', '); const n=words[cs.length]||String(cs.length); return n+' '+String(w)+' mm crack'+(cs.length!==1?'s':'')+' (Picture ID'+(cs.length!==1?'s':'')+' '+ids+')'; });
+  return p2.join(' and ')+' are the most significant. Remaining cracks are predominantly hairline to 1 mm (Category 0-1).';
+}
+function needsDamageNumberV33(cond){ const s=reportClean(cond); return isDefect(s) && !/crack/i.test(s) && /\bdamage(?:d)?\b/i.test(s); }
+function prepareSubmissionEntriesV33(ents){
+  let n=1; return [...(ents||[])].sort((a,b)=>(Number(a.photoId)||0)-(Number(b.photoId)||0)).map(e=>{ const x={...e}; if(!Object.prototype.hasOwnProperty.call(x,'_damageNo')) x._damageNo=needsDamageNumberV33(x.condition)?('D'+(n++)):''; else if(x._damageNo){ const m=String(x._damageNo).match(/D(\d+)/i); if(m) n=Math.max(n,Number(m[1])+1); } x._specificLocation=x._specificLocation||normalizeSubmissionLocationV33(x.description,x.condition,'Exterior'); return x; });
+}
+function normalizeSubmissionLocationV33(loc,defect,area='Exterior'){
+  loc=reportClean(loc).replace(/\s+View$/i,''); defect=reportClean(defect).replace(/\s+D\d+\b/ig,''); if(!loc) loc=/^Exterior/i.test(area)?'Outer Wall':'Wall'; loc=loc.replace(/^Inside\b/i,'Inner');
+  const low=loc.toLowerCase(); if(['wall crack','crack','wall crack view'].includes(low)) loc='Outer Wall Crack'; else if(['plaster damage','wall plaster damage'].includes(low)) loc='Outer Wall Plaster Damage'; else if(['wall damage','damage'].includes(low)) loc='Outer Wall Damage';
+  const d=defect.toLowerCase(); if(isDefect(defect)){ if(d.includes('crack')&&!/crack/i.test(loc)) loc+=' Crack'; else if(d.includes('plaster')&&!/plaster/i.test(loc)) loc+=' Plaster Damage'; else if(d.includes('paint')&&!/paint/i.test(loc)) loc+=' Paint Peel Off'; else if(d.includes('tile')&&!/tile/i.test(loc)) loc+=' Tile Damage'; }
+  return smartTitleCase(loc)+' View';
+}
+function summaryDataV33(ents){ const cracks=buildV7CracksV33(ents), non=buildV7NonCracksV33(ents), groups=groupV7NonCracksV33(non); const max=cracks.length?Math.max(...cracks.map(c=>categoryIntV33(c.category))):0; const min=cracks.length?(cracks.some(c=>c.category==='0-1')?0:Math.min(...cracks.map(c=>categoryIntV33(c.category)))):0; return {cracks,non,groups,min,max,minDegree:categoryDegreeV33(min),maxDegree:categoryDegreeV33(max)}; }
+
 function buildInfoPage(b, info, ents){
-  // ── Helpers ──────────────────────────────────────────────
-  function infoRow(label, value){
-    return '<w:tr><w:trPr><w:trHeight w:val="230" w:hRule="atLeast"/></w:trPr>'
-      + docxCell(docxPara([{text:label,bold:true,size:18,color:'1F3864'}]),{width:3800,shading:'D9E2F3'})
-      + docxCell(docxPara([{text:value||'—',size:18}]),{width:6600})
-      + '</w:tr>';
-  }
-  function sectionRow(title){
-    return '<w:tr><w:trPr><w:trHeight w:val="420" w:hRule="atLeast"/></w:trPr>'
-      + docxCell(docxPara([{text:title,bold:true,size:20,color:'FFFFFF'}],{align:'left'}),{width:10400,gridSpan:2,shading:'1F3864'})
-      + '</w:tr>';
-  }
-  const tblBorders = '<w:tblBorders>'
-    + '<w:top w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:left w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:bottom w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:right w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:insideH w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:insideV w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '</w:tblBorders>';
-  const tblPr2col = '<w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + tblBorders + '</w:tblPr>';
+  // v3.3 final-report content only. Survey capture/storage behavior is unchanged.
+  const structId = reportClean(info.structId || info.bid || b.name || '');
+  const buildingName = reportClean(info.bname || b.name || '');
+  const sd = summaryDataV33(ents||[]);
+  const defectLabels = sd.groups.map(x=>x[0]);
+  const defectPhrase = defectLabels.join(', ').toLowerCase();
+
+  const tblBorders = '<w:tblBorders><w:top w:val="single" w:sz="4" w:color="auto"/><w:left w:val="single" w:sz="4" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:color="auto"/><w:right w:val="single" w:sz="4" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:color="auto"/></w:tblBorders>';
+  const tblPr2col = '<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'+tblBorders+'<w:tblLayout w:type="autofit"/></w:tblPr>';
   const tblGrid2col = '<w:tblGrid><w:gridCol w:w="3800"/><w:gridCol w:w="6600"/></w:tblGrid>';
+  function infoRow(label,value){
+    return '<w:tr><w:trPr><w:trHeight w:val="220" w:hRule="atLeast"/></w:trPr>'
+      + '<w:tc><w:tcPr><w:tcW w:w="3800" w:type="dxa"/><w:shd w:fill="E2F0D9"/><w:tcMar><w:top w:w="35" w:type="dxa"/><w:left w:w="55" w:type="dxa"/><w:bottom w:w="35" w:type="dxa"/><w:right w:w="55" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:label,bold:true,size:17}],{align:'left'})+'</w:tc>'
+      + '<w:tc><w:tcPr><w:tcW w:w="6600" w:type="dxa"/><w:tcMar><w:top w:w="35" w:type="dxa"/><w:left w:w="55" w:type="dxa"/><w:bottom w:w="35" w:type="dxa"/><w:right w:w="55" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:value||'—',size:17}],{align:'left'})+'</w:tc></w:tr>';
+  }
 
-  // ── PROJECT INTRODUCTION (section 1) ─────────────────────
-  const introHeading = docxPara([{text:'1. PROJECT INTRODUCTION',bold:true,size:24,color:'1F3864'}]);
-  const introText = '<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">' + xmlEscape(info.intro || 'The High-Speed Rail (HSR) Project in UAE remains as one of the most significant public transportation developments within the country and is to set a reference in the region.')
-    + '</w:t></w:r></w:p>';
+  const introHeading=docxPara([{text:'1. Project Introduction',bold:true,size:24,color:'1F3864'}]);
+  const introText=docxPara([{text:info.intro||'The High-Speed Rail (HSR) Project in UAE remains as one of the most significant public transportation developments within the country and is to set a reference in the region.\nThe vision of this HSR project is to deliver an effective transport system that contributes to the economic growth, quality of life and environmental sustainability of the UAE. The mission is to regulate, plan and develop an efficient and well-integrated transport system that serves the public interest by enhancing safe and sustainable mobility.\nThe ultimate goal of HSR Programme is to create a high-speed rail network that will form the transport backbone of the country and enable passenger connectivity within UAE.',size:18}],{align:'both'});
+  const purposeHeading=docxPara([{text:'2. Purpose',bold:true,size:24,color:'1F3864'}]);
+  const purpose='A condition survey shall be undertaken on structures located within the zone of influence of shafts and tunnels of the '+(info.project||'UAE High Speed Rail (HSR) Project')+' before and after the construction activities. This document comprises the pre-construction condition survey of building ID: '+structId+(buildingName?' ('+buildingName+')':'')+' located within the zone of influence of the same project.';
+  const purposeText=docxPara([{text:purpose,size:18}],{align:'both'});
 
-  // ── PURPOSE paragraph (section 2) ────────────────────────
-  const purposeHeading = docxPara([{text:'2. PURPOSE',bold:true,size:24,color:'1F3864'}]);
-  // Building ID = the current building (info.bid / info.bname / building name); Structure ID = info.structId
-  const buildingIdRef = info.bid || info.bname || b.name || '';
-  const structIdRef   = info.structId || '';
-  const bnameRef      = info.bname || b.name || '';
-  const purposeText = '<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">A condition survey shall be undertaken on structures located within the zone of influence of shafts and tunnels of the '
-    + xmlEscape(info.project||'UAE High Speed Rail (HSR) Project')
-    + ' before and after the construction activities. This document comprises the pre-construction condition survey of building ID: '
-    + xmlEscape(buildingIdRef)
-    + (bnameRef ? ', (' + xmlEscape(bnameRef) + ')' : '')
-    + (structIdRef ? ', Structure ID: ' + xmlEscape(structIdRef) : '')
-    + ' located within the zone of influence of the same project.</w:t></w:r></w:p>';
+  const genHeading=docxPara([{text:'3. General Information',bold:true,size:24,color:'1F3864'}]);
+  let rows='';
+  rows+=infoRow('Project name:',info.project); rows+=infoRow('Client:',info.client); rows+=infoRow('Consultant:',info.consultant); rows+=infoRow('Contractor:',info.contractor); rows+=infoRow('Service provider:',info.service);
+  rows+=infoRow('Subject:','Pre-Construction Condition Survey Report for Building'); rows+=infoRow('Building Owner Name:',info.owner); rows+=infoRow('Contact Person Number:',info.contact);
+  rows+=infoRow('Building ID:',buildingName||b.name); rows+=infoRow('Structure Number:',structId); rows+=infoRow('Makani Number',info.makani); rows+=infoRow('Name and signature of Surveyor:',info.surveyor); rows+=infoRow('Name and signature of representative of LCWJV:',info.rep);
+  rows+=infoRow('Survey date:',info.date); rows+=infoRow('No. of levels:',info.levels); rows+=infoRow('No. of basements:',info.basements); rows+=infoRow('Type of building:',info.type); rows+=infoRow('Distance from Alignment',info.distance); rows+=infoRow('Address of the Building',info.address); rows+=infoRow('Age of Building',info.age); rows+=infoRow('Dimension of the Building',info.dim); rows+=infoRow('Foundation Type',info.foundation); rows+=infoRow('Structure Form',info.structure);
+  const genTbl='<w:tbl>'+tblPr2col+tblGrid2col+rows+'</w:tbl>';
 
-  // ── GENERAL INFORMATION table (section 3) ────────────────
-  const genHeading = docxPara([{text:'3. GENERAL INFORMATION',bold:true,size:24,color:'1F3864'}]);
-  let rows = '';
-  rows += infoRow('Project name',               info.project);
-  rows += infoRow('Client',                     info.client);
-  rows += infoRow('Consultant',                 info.consultant);
-  rows += infoRow('Contractor',                 info.contractor);
-  rows += infoRow('Service provider',           info.service);
-  rows += infoRow('Building Owner Name',        info.owner);
-  rows += infoRow('Contact Person Mobile Number', info.contact);
-  rows += infoRow('Building ID',                info.bname || b.name);
-  rows += infoRow('Structure Number',           info.structId);
-  rows += infoRow('Makani Number',              info.makani);
-  rows += infoRow('Name and signature of Surveyor', info.surveyor);
-  rows += infoRow('Name and signature of representative of LCWJV', info.rep);
-  rows += infoRow('Survey date',                info.date);
-  rows += infoRow('No. of levels',              info.levels);
-  rows += infoRow('No. of basements',           info.basements);
-  rows += infoRow('Type of building',           info.type);
-  rows += infoRow('Distance from Alignment',    info.distance);
-  rows += infoRow('Address of the Building',    info.address);
-  rows += infoRow('Age of Building',            info.age);
-  rows += infoRow('Dimension of the Building',  info.dim);
-  rows += infoRow('Foundation Type',            info.foundation);
-  rows += infoRow('Structure Form',             info.structure);
-  const genTbl = '<w:tbl>' + tblPr2col + tblGrid2col + rows + '</w:tbl>';
+  // Section 4: green header + content inside one bordered table, matching v3.3.
+  let headline='', body='';
+  if(sd.cracks.length){
+    headline=sd.minDegree+' to '+sd.maxDegree+' ('+sd.min+'-'+sd.max+')';
+    const visual=sd.cracks.filter(c=>!c.measured).length, measured=sd.cracks.length-visual;
+    body='During the pre-construction survey, '+sd.cracks.length+' crack observations were recorded from the Defect Type cells. The recorded cracking ranges from Damage Category '+sd.min+' to '+sd.max+' ('+sd.minDegree+' to '+sd.maxDegree+') in accordance with Burland et al. (1977) and Boscardin & Cording (1989). Of these, '+visual+' are visual/hairline observations reported as < 1.0 mm and '+measured+' have stated measurements.'+(defectPhrase?' Other recorded defects include '+defectPhrase+'.':'');
+  }else{
+    headline='No cracks recorded';
+    body=sd.non.length ? 'No crack observations were found in the Defect Type cells of the photograph/defect pages. Recorded non-crack defects include '+defectPhrase+'.' : 'No crack or other defect observations were recorded in the Defect Type cells of the photograph/defect pages; all listed Defect Type entries are N/A.';
+  }
+  body += ' Please refer to the detailed photograph and defect pages in the source condition survey report.';
+  const summaryHeading=docxPara([{text:'4. Summary/Comments:',bold:true,size:24,color:'1F3864'}]);
+  const sumPr='<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'+tblBorders+'<w:tblLayout w:type="autofit"/></w:tblPr><w:tblGrid><w:gridCol w:w="10400"/></w:tblGrid>';
+  const sumHeader='<w:tr><w:trPr><w:trHeight w:val="240" w:hRule="atLeast"/></w:trPr><w:tc><w:tcPr><w:shd w:fill="C6E0B4"/><w:tcMar><w:top w:w="65" w:type="dxa"/><w:left w:w="70" w:type="dxa"/><w:bottom w:w="65" w:type="dxa"/><w:right w:w="70" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:'Summary/Comments:',bold:true,size:17}],{align:'left'})+'</w:tc></w:tr>';
+  const sumBody='<w:tr><w:trPr><w:trHeight w:val="300" w:hRule="atLeast"/></w:trPr><w:tc><w:tcPr><w:tcMar><w:top w:w="65" w:type="dxa"/><w:left w:w="70" w:type="dxa"/><w:bottom w:w="65" w:type="dxa"/><w:right w:w="70" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:headline,bold:true,size:17},{text:'\n'+body,size:17}],{align:'left'})+'</w:tc></w:tr>';
+  const summaryTbl='<w:tbl>'+sumPr+sumHeader+sumBody+'</w:tbl>';
 
-  // ── SUMMARY box (section 4) ──────────────────────────────
-  const summaryHeading = docxPara([{text:'4. SUMMARY / COMMENTS:',bold:true,size:24,color:'1F3864'}]);
-  const summaryTblPr = '<w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + tblBorders + '</w:tblPr>';
-  const summaryTblGrid = '<w:tblGrid><w:gridCol w:w="10400"/></w:tblGrid>';
-  const summaryRow = '<w:tr><w:trPr><w:trHeight w:val="400" w:hRule="atLeast"/></w:trPr>'
-    + '<w:tc><w:tcPr><w:tcW w:w="10400" w:type="dxa"/>'
-    + '<w:tcMar><w:top w:type="dxa" w:w="100"/><w:left w:type="dxa" w:w="140"/><w:bottom w:type="dxa" w:w="100"/><w:right w:type="dxa" w:w="140"/></w:tcMar>'
-    + '</w:tcPr>'
-    + '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">' + xmlEscape(info.summary||'No summary provided.') + '</w:t></w:r>'
-    + '</w:p></w:tc></w:tr>';
-  const summaryTbl = '<w:tbl>' + summaryTblPr + summaryTblGrid + summaryRow + '</w:tbl>';
-
-  // ── CONSOLIDATED CRACK REGISTER SUMMARY ──────────────────
-  const crackSummary = buildCrackRegisterSummary(ents || [], info);
-
-  return introHeading
-    + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
-    + introText
-    + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
-    + purposeHeading
-    + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
-    + purposeText
-    + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
-    + genHeading
-    + '<w:p><w:pPr><w:spacing w:after="60"/></w:pPr></w:p>'
-    + genTbl
-    + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
-    + summaryHeading
-    + '<w:p><w:pPr><w:spacing w:after="40"/></w:pPr></w:p>'
-    + summaryTbl
-    + crackSummary;
+  return introHeading+'<w:p/>'+introText+'<w:p/>'+purposeHeading+'<w:p/>'+purposeText+'<w:p/>'+genHeading+'<w:p/>'+genTbl+'<w:p/>'+summaryHeading+'<w:p/>'+summaryTbl+buildCrackRegisterSummary(ents||[],info);
 }
 
 // ── Table of Contents page builder ─────────────────────────
 function buildTOCPage(ents){
-  const hasCracks = (ents || []).some(e => isDefect(e.condition) && /crack/i.test(e.condition || ''));
-  const hasPhotos = (ents || []).length > 0;
-
-  // TOC heading
-  const heading = docxPara([{text:'Table of Contents',bold:true,size:28,color:'1F3864'}], {align:'center'});
-
-  // A TOC line: title (left) ... page-ish tab (right). Uses a right tab with dot leader.
-  function tocLine(text, bold){
-    const b = bold ? '<w:b/><w:bCs/>' : '';
-    return '<w:p><w:pPr><w:spacing w:after="80"/>'
-      + '<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9900"/></w:tabs></w:pPr>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + b + '<w:sz w:val="22"/><w:szCs w:val="22"/><w:color w:val="1F3864"/></w:rPr>'
-      + '<w:t xml:space="preserve">' + xmlEscape(text) + '</w:t></w:r>'
-      + '<w:r><w:rPr><w:sz w:val="22"/></w:rPr><w:tab/></w:r>'
-      + '</w:p>';
-  }
-
-  let lines = '';
-  lines += tocLine('1. Project Introduction', true);
-  lines += tocLine('2. Purpose', true);
-  lines += tocLine('3. General Information', true);
-  lines += tocLine('4. Summary / Comments:', true);
-  if(hasCracks || hasPhotos){
-    lines += tocLine('   a. Consolidated Crack Register Summary', false);
-    lines += tocLine('   b. Summary of Other Recorded Defects (Non-Crack)', false);
-  }
-  lines += tocLine('5. References', true);
-  lines += tocLine('6. Location Map', true);
-  lines += tocLine('7. Building External Views', true);
-  if(hasPhotos) lines += tocLine('8. Photographs and Defects Details of Building', true);
-
-  const gap = '<w:p><w:pPr><w:spacing w:after="200"/></w:pPr></w:p>';
-  return heading + gap + lines;
+  const heading=docxPara([{text:'Table of Contents',bold:true,size:28,color:'1F3864'}],{align:'center'});
+  function tocLine(text){ return '<w:p><w:pPr><w:spacing w:after="70"/><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9900"/></w:tabs></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:bCs/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t xml:space="preserve">'+xmlEscape(text)+'</w:t></w:r></w:p>'; }
+  const lines=['1. Project Introduction','2. Purpose','3. General Information','4. Summary/Comments:','5. Consolidated Crack Register Summary','6. Summary of Other Recorded Defects (Non-Crack)','7. References','8. Location Map/ Footprint Sketch','9. Building\'s External Views','10. Photographs And Defects Details of Building','11. NOC Details'];
+  return heading+'<w:p/>'+lines.map(tocLine).join('');
 }
 
 // ── Crack Register Summary builder ─────────────────────────
 function buildCrackRegisterSummary(ents, info){
-  const xe = xmlEscape;
-
-  // Split crack vs non-crack entries
-  const crackEnts = ents.filter(e => isDefect(e.condition) && /crack/i.test(e.condition || ''));
-  const otherEnts = ents.filter(e => isDefect(e.condition) && !/crack/i.test(e.condition || ''));
-
-  // Parse crack width (mm) out of the condition string, if present
-  function parseWidth(cond){
-    const m = (cond || '').match(/Width:\s*([\d.]+)\s*mm/i);
-    return m ? m[1] : '';
+  const xe=xmlEscape, sd=summaryDataV33(ents||[]), cracks=sd.cracks, groups=sd.groups;
+  const bd='<w:tblBorders><w:top w:val="single" w:sz="4" w:color="auto"/><w:left w:val="single" w:sz="4" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:color="auto"/><w:right w:val="single" w:sz="4" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:color="auto"/></w:tblBorders>';
+  function tc(text,width,bold,fill,align='center'){
+    const sh=fill?'<w:shd w:fill="'+fill+'"/>':''; const b=bold?'<w:b/><w:bCs/>':'';
+    return '<w:tc><w:tcPr><w:tcW w:w="'+width+'" w:type="dxa"/>'+sh+'<w:tcMar><w:top w:w="35" w:type="dxa"/><w:left w:w="45" w:type="dxa"/><w:bottom w:w="35" w:type="dxa"/><w:right w:w="45" w:type="dxa"/></w:tcMar><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="170" w:lineRule="auto"/><w:jc w:val="'+align+'"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>'+b+'<w:sz w:val="14"/><w:szCs w:val="14"/></w:rPr><w:t xml:space="preserve">'+xe(text==null?'':String(text))+'</w:t></w:r></w:p></w:tc>';
   }
-  // Derive degree label from a numeric width via CRACK_DEGREES
-  function degreeFor(widthStr){
-    const v = parseFloat(widthStr);
-    if(!v) return '';
-    const d = getCrackDegree(v);
-    return d ? d.label : '';
+  const heading=docxPara([{text:'5. Consolidated Crack Register Summary',bold:true,size:24,color:'1F3864'}]).replace('<w:pPr>','<w:pPr><w:keepNext/>');
+  const sid=reportClean(info.structId||''); const sidLine=docxPara([{text:'Structure ID: '+sid,bold:true,size:18}],{align:'left'});
+  let intro=''; if(cracks.length) intro=docxPara([{text:'The table below consolidates all cracks recorded during the pre-construction condition survey, with locations, widths and damage classification per Burland et al. (1977). This register serves as the baseline reference for comparison during and after construction.',size:17}],{align:'left'}); else intro=docxPara([{text:'No crack records were identified in the Defect Type cells on the photograph/defect detail pages. Accordingly, no crack register entries are generated for this structure.',size:17}],{align:'left'});
+  let main='';
+  if(cracks.length){
+    const cw=[480,650,770,3090,880,825,1020]; const grid='<w:tblGrid>'+cw.map(w=>'<w:gridCol w:w="'+w+'"/>').join('')+'</w:tblGrid>'; const pr='<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'+bd+'<w:tblLayout w:type="autofit"/></w:tblPr>';
+    const hdr=['Sr. No.','Picture ID','Elevation','Crack Location / Description','Crack Width (mm)','Damage Category','Degree of Damage']; let rows='<w:tr><w:trPr><w:tblHeader/><w:trHeight w:val="238" w:hRule="atLeast"/></w:trPr>'+hdr.map((h,i)=>tc(h,cw[i],true,'C6E0B4')).join('')+'</w:tr>';
+    cracks.forEach((c,i)=>{ const wt=c.measured&&c.width!=null?c.width.toFixed(1)+' (measured)':'< 1.0 (visual)'; const vals=[i+1,c.pictureId,c.elevation,c.description,wt,c.category,c.degree]; rows+='<w:tr><w:trPr><w:trHeight w:val="215" w:hRule="atLeast"/></w:trPr>'+vals.map((v,j)=>tc(v,cw[j],false,null,j===3?'left':'center')).join('')+'</w:tr>'; });
+    main='<w:tbl>'+pr+grid+rows+'</w:tbl>';
   }
-  function catFor(widthStr){
-    const v = parseFloat(widthStr);
-    if(!v) return '';
-    const d = getCrackDegree(v);
-    return d ? String(d.cat) : '';
-  }
-
-  // ── borders (single, thin, black) ──
-  const bd = '<w:tblBorders>'
-    + '<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    + '<w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    + '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    + '<w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    + '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    + '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    + '</w:tblBorders>';
-
-  // cell builder: text, width(dxa), bold?, fill?, whiteText?
-  function tc(text, width, bold, fill, white){
-    const b  = bold  ? '<w:b/><w:bCs/>' : '';
-    const col = white ? '<w:color w:val="FFFFFF"/>' : '';
-    const sh = fill ? '<w:shd w:val="clear" w:color="auto" w:fill="' + fill + '"/>' : '';
-    return '<w:tc><w:tcPr><w:tcW w:w="' + width + '" w:type="dxa"/>' + sh + '</w:tcPr>'
-      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + b + col
-      + '<w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-      + '<w:t xml:space="preserve">' + xe(text == null ? '' : String(text)) + '</w:t></w:r>'
-      + '</w:p></w:tc>';
-  }
-  const HDR = '1F4E79';   // dark blue header
-  const ACC = 'E2EFDA';   // light green accent
-
-  const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
-  const heading = docxPara([{text:'Consolidated Crack Register Summary',bold:true,size:24,color:'1F3864'}]);
-
-  // ── Intro paragraph (Burland et al. 1977) ──
-  const intro = '<w:p><w:pPr><w:spacing w:after="120"/></w:pPr>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">The cracks recorded during the pre-construction condition survey are consolidated below. '
-    + 'Damage categories and degree of damage are classified in accordance with Burland et al. (1977).</w:t></w:r></w:p>';
-
-  // ── MAIN CRACK TABLE ──
-  // Col widths (dxa) sum = 9192: 700|1050|1350|3242|1150|850|850
-  const cw = [700,1050,1350,3242,1150,850,850];
-  const mainGrid = '<w:tblGrid>' + cw.map(w=>'<w:gridCol w:w="'+w+'"/>').join('') + '</w:tblGrid>';
-  const mainPr = '<w:tblPr><w:tblW w:w="9192" w:type="dxa"/>' + bd + '<w:tblLayout w:type="fixed"/></w:tblPr>';
-
-  const mainHeadRow = '<w:tr><w:trPr><w:tblHeader/></w:trPr>'
-    + tc('Sr. No.', cw[0], true, HDR, true)
-    + tc('Picture ID', cw[1], true, HDR, true)
-    + tc('Elevation', cw[2], true, HDR, true)
-    + tc('Crack Location / Description', cw[3], true, HDR, true)
-    + tc('Crack Width (mm)', cw[4], true, HDR, true)
-    + tc('Damage Category', cw[5], true, HDR, true)
-    + tc('Degree of Damage', cw[6], true, HDR, true)
-    + '</w:tr>';
-
-  let mainBody = '';
-  if(crackEnts.length === 0){
-    mainBody = '<w:tr>'
-      + '<w:tc><w:tcPr><w:tcW w:w="9192" w:type="dxa"/><w:gridSpan w:val="7"/></w:tcPr>'
-      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:i/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-      + '<w:t xml:space="preserve">No cracks recorded.</w:t></w:r></w:p></w:tc></w:tr>';
-  } else {
-    crackEnts.forEach((e,i)=>{
-      const w = parseWidth(e.condition);
-      mainBody += '<w:tr>'
-        + tc(i+1, cw[0], false)
-        + tc(e.photoId, cw[1], false)
-        + tc(smartTitleCase(e.direction || ''), cw[2], false)
-        + tc(e.description || '', cw[3], false)
-        + tc(w, cw[4], false)
-        + tc(catFor(w), cw[5], false)
-        + tc(degreeFor(w), cw[6], false)
-        + '</w:tr>';
-    });
-  }
-  const mainTbl = '<w:tbl>' + mainPr + mainGrid + mainHeadRow + mainBody + '</w:tbl>';
-
-  // ── X.1 NON-CRACK DEFECTS TABLE (grouped by defect type) ──
-  const subHeading = docxPara([{text:'Summary of Other Recorded Defects (Non-Crack)',bold:true,size:22,color:'1F3864'}]);
-
-  // Group non-crack entries by defect type (base of condition string, before any width/detail)
-  const groups = {};
-  otherEnts.forEach(e=>{
-    let type = (e.condition || '').split('(')[0].split(' - ')[0].trim() || 'Defect';
-    type = smartTitleCase(type);
-    if(!groups[type]) groups[type] = {pics:[], elevs:new Set()};
-    groups[type].pics.push(e.photoId);
-    if(e.direction) groups[type].elevs.add(smartTitleCase(e.direction));
-  });
-
-  const ocw = [3000,2500,900,2792]; // sum 9192
-  const oGrid = '<w:tblGrid>' + ocw.map(w=>'<w:gridCol w:w="'+w+'"/>').join('') + '</w:tblGrid>';
-  const oPr = '<w:tblPr><w:tblW w:w="9192" w:type="dxa"/>' + bd + '<w:tblLayout w:type="fixed"/></w:tblPr>';
-  const oHead = '<w:tr><w:trPr><w:tblHeader/></w:trPr>'
-    + tc('Defect Type', ocw[0], true, HDR, true)
-    + tc('Picture ID(s)', ocw[1], true, HDR, true)
-    + tc('Qty', ocw[2], true, HDR, true)
-    + tc('Elevation(s)', ocw[3], true, HDR, true)
-    + '</w:tr>';
-  let oBody = '';
-  const gKeys = Object.keys(groups);
-  if(gKeys.length === 0){
-    oBody = '<w:tr>'
-      + '<w:tc><w:tcPr><w:tcW w:w="9192" w:type="dxa"/><w:gridSpan w:val="4"/></w:tcPr>'
-      + '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:i/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-      + '<w:t xml:space="preserve">No other defects recorded.</w:t></w:r></w:p></w:tc></w:tr>';
-  } else {
-    gKeys.forEach(k=>{
-      const g = groups[k];
-      oBody += '<w:tr>'
-        + tc(k, ocw[0], false, ACC)
-        + tc(g.pics.join(', '), ocw[1], false)
-        + tc(g.pics.length, ocw[2], false)
-        + tc(Array.from(g.elevs).join(', '), ocw[3], false)
-        + '</w:tr>';
-    });
-  }
-  const oTbl = '<w:tbl>' + oPr + oGrid + oHead + oBody + '</w:tbl>';
-
-  const gap = '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>';
-
-  return pageBreak
-    + heading + gap
-    + intro
-    + mainTbl
-    + gap
-    + subHeading + gap
-    + oTbl;
+  const sub=docxPara([{text:'6. Summary of Other Recorded Defects (Non-Crack)',bold:true,size:22,color:'1F3864'}]).replace('<w:pPr>','<w:pPr><w:keepNext/>'); const ocw=[2500,3600,750,2550]; const ogr='<w:tblGrid>'+ocw.map(w=>'<w:gridCol w:w="'+w+'"/>').join('')+'</w:tblGrid>'; const opr='<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'+bd+'<w:tblLayout w:type="autofit"/></w:tblPr>';
+  let orows='<w:tr><w:trPr><w:tblHeader/><w:trHeight w:val="238" w:hRule="atLeast"/></w:trPr>'+['Defect Type','Picture ID(s)','Qty','Elevation(s)'].map((h,i)=>tc(h,ocw[i],true,'C6E0B4')).join('')+'</w:tr>';
+  if(groups.length){ groups.forEach(([label,g])=>{ const ids=[...g.ids].sort((a,b)=>Number(a)-Number(b)); const eo={South:0,East:1,West:2,North:3,Northeast:4,Southeast:5,Northwest:6,Southwest:7}; const ev=[...g.elevations].sort((a,b)=>(eo[a]??99)-(eo[b]??99)||a.localeCompare(b)); const vals=[label,ids.join(', '),ids.length,ev.join(' / ')]; orows+='<w:tr><w:trPr><w:trHeight w:val="215" w:hRule="atLeast"/></w:trPr>'+vals.map((v,i)=>tc(v,ocw[i],false,null,i===0?'left':'center')).join('')+'</w:tr>'; }); }
+  else orows+='<w:tr><w:trPr><w:trHeight w:val="215" w:hRule="atLeast"/></w:trPr>'+tc('No non-crack defect records were identified in the Defect Type cells.',9400,false,null,'left').replace('<w:tcPr>','<w:tcPr><w:gridSpan w:val="4"/>')+'</w:tr>';
+  const ot='<w:tbl>'+opr+ogr+orows+'</w:tbl>';
+  let overall='Overall Assessment: '; const nonPhrase=groups.map(x=>x[0]).join(', ').toLowerCase();
+  if(cracks.length){ const lower=cracks.some(c=>c.category==='0-1')?'0-1 (Negligible to Very Slight)':sd.min+' ('+sd.minDegree+')'; overall+=cracks.length+' cracks recorded, ranging from Damage Category '+lower+' up to Category '+sd.max+' ('+sd.maxDegree+'). '+significantCrackSentenceV33(cracks)+(nonPhrase?' Other recorded defects comprise '+nonPhrase+'.':''); }
+  else if(groups.length) overall+='No cracks were recorded in the Defect Type cells. Other recorded defects comprise '+nonPhrase+'.'; else overall+='No cracks or non-crack defects were recorded in the Defect Type cells; all photograph/defect entries are N/A.';
+  return '<w:p/>'+heading+sidLine+intro+(main?'<w:p/>'+main:'')+'<w:p/>'+sub+'<w:p/>'+ot+'<w:p/>'+docxPara([{text:'Overall Assessment: ',bold:true,size:17},{text:overall.replace(/^Overall Assessment:\s*/,''),size:17}],{align:'left'});
 }
 
 function buildReferencesPage(){
@@ -3901,269 +3785,47 @@ function buildReferencesPage(){
 
   const spacer = '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>';
 
-  return title1 + title2 + spacer
+  const sectionHeading = docxPara([{text:'7. References',bold:true,size:24,color:'1F3864'}]);
+  return sectionHeading + spacer + title1 + title2 + spacer
     + tbl + spacer
     + ref1 + ref2 + spacer
     + noteTitle + note1 + note2;
 }
 
 function buildLocationPage(info, opts={}){
-  // ── LOCATION MAP page ────────────────────────────────────
-  const heading = docxPara([{text:'5. LOCATION MAP',bold:true,size:24,color:'1F3864'}]);
-
-  const tblBorders = '<w:tblBorders>'
-    + '<w:top w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:left w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:bottom w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:right w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:insideH w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:insideV w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '</w:tblBorders>';
-
-  function infoRow2(label, value){
-    return '<w:tr><w:trPr><w:trHeight w:val="380" w:hRule="atLeast"/></w:trPr>'
-      + '<w:tc><w:tcPr><w:tcW w:w="3800" w:type="dxa"/>'
-      + '<w:shd w:fill="D9E2F3" w:val="clear"/>'
-      + '<w:tcMar><w:top w:type="dxa" w:w="80"/><w:left w:type="dxa" w:w="140"/><w:bottom w:type="dxa" w:w="80"/><w:right w:type="dxa" w:w="140"/></w:tcMar>'
-      + '<w:vAlign w:val="center"/></w:tcPr>'
-      + '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:bCs/><w:color w:val="1F3864"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-      + '<w:t xml:space="preserve">' + xmlEscape(label) + '</w:t></w:r></w:p></w:tc>'
-      + '<w:tc><w:tcPr><w:tcW w:w="6600" w:type="dxa"/>'
-      + '<w:tcMar><w:top w:type="dxa" w:w="80"/><w:left w:type="dxa" w:w="140"/><w:bottom w:type="dxa" w:w="80"/><w:right w:type="dxa" w:w="140"/></w:tcMar>'
-      + '<w:vAlign w:val="center"/></w:tcPr>'
-      + '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-      + '<w:t xml:space="preserve">' + xmlEscape(value||'—') + '</w:t></w:r></w:p></w:tc>'
-      + '</w:tr>';
-  }
-
-  const coordTblPr = '<w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + tblBorders + '</w:tblPr>';
-  const coordTblGrid = '<w:tblGrid><w:gridCol w:w="3800"/><w:gridCol w:w="6600"/></w:tblGrid>';
-  let coordRows = '';
-  coordRows += infoRow2('Building ID',            info.bid);
-  coordRows += infoRow2('Building Name',          info.bname);
-  coordRows += infoRow2('Address',                info.address);
-  coordRows += infoRow2('Building Coordinate — Latitude',  (info.lat ? info.lat + '°' : '—'));
-  coordRows += infoRow2('Building Coordinate — Longitude', (info.lng ? info.lng + '°' : '—'));
-  const coordTbl = '<w:tbl>' + coordTblPr + coordTblGrid + coordRows + '</w:tbl>';
-
-  // Map note box
-  const mapNote = '<w:p><w:pPr><w:spacing w:after="60"/></w:pPr>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">Map link: https://maps.google.com/?q=' + xmlEscape((info.lat||'') + ',' + (info.lng||'')) + '</w:t></w:r></w:p>';
-
-  const zoneNote = '<w:p><w:pPr><w:spacing w:after="40"/></w:pPr>'
-    + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:bCs/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-    + '<w:t xml:space="preserve">Tunnel Alignment Centre Line / Zone of Influence @30m</w:t></w:r></w:p>';
-
-  // Map image in Word
-  // mapRelId and mapFname are passed in if available
-  let mapImgXml = '';
-  if(opts && opts.mapRelId){
-    const MW = Math.round(14.5 * 360000);  // 14.5cm wide
-    const MH = Math.round(9.0  * 360000);  // 9.0cm tall
-    mapImgXml = '<w:p><w:pPr><w:spacing w:after="60"/><w:jc w:val="center"/></w:pPr>'
-      + '<w:r><w:rPr/>'
-      + '<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
-      + '<wp:extent cx="' + MW + '" cy="' + MH + '"/>'
-      + '<wp:effectExtent t="0" r="0" b="0" l="0"/>'
-      + '<wp:docPr id="8001" name="LocationMap" descr="Building Location Map"/>'
-      + '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>'
-      + '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
-      + '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-      + '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-      + '<pic:nvPicPr><pic:cNvPr id="0" name="LocationMap" descr="Building Location Map"/><pic:cNvPicPr><a:picLocks noChangeAspect="1" noChangeArrowheads="1"/></pic:cNvPicPr></pic:nvPicPr>'
-      + '<pic:blipFill><a:blip r:embed="' + opts.mapRelId + '" cstate="none"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
-      + '<pic:spPr bwMode="auto"><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + MW + '" cy="' + MH + '"/></a:xfrm>'
-      + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
-      + '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>'
-      + '</w:r></w:p>';
-  } else {
-    // No map image — show placeholder text
-    mapImgXml = '<w:p><w:pPr><w:spacing w:after="60"/><w:jc w:val="center"/></w:pPr>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:i/><w:color w:val="999999"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-      + '<w:t>[Map image not available — use GPS button in app to capture location map]</w:t></w:r></w:p>';
-  }
-
-  return heading
-    + '<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>'
-    + coordTbl
-    + '<w:p><w:pPr><w:spacing w:after="60"/></w:pPr></w:p>'
-    + mapImgXml
-    + mapNote
-    + zoneNote;
+  const heading=docxPara([{text:'8. Location Map/ Footprint Sketch',bold:true,size:24,color:'1F3864'}]);
+  const bd='<w:tblBorders><w:top w:val="single" w:color="1F3864" w:sz="4"/><w:left w:val="single" w:color="1F3864" w:sz="4"/><w:bottom w:val="single" w:color="1F3864" w:sz="4"/><w:right w:val="single" w:color="1F3864" w:sz="4"/><w:insideH w:val="single" w:color="1F3864" w:sz="4"/><w:insideV w:val="single" w:color="1F3864" w:sz="4"/></w:tblBorders>';
+  const pr='<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'+bd+'<w:tblLayout w:type="autofit"/></w:tblPr>'; const grid='<w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="7400"/></w:tblGrid>';
+  function row(label,value,first=false){ const fill='D9E2F3'; return '<w:tr><w:trPr><w:trHeight w:val="215" w:hRule="atLeast"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:fill="'+fill+'"/><w:tcMar><w:top w:w="25" w:type="dxa"/><w:left w:w="45" w:type="dxa"/><w:bottom w:w="25" w:type="dxa"/><w:right w:w="45" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:label,bold:true,size:15}],{align:'left'})+'</w:tc><w:tc><w:tcPr><w:tcW w:w="7400" w:type="dxa"/>'+(first?'<w:shd w:fill="'+fill+'"/>':'')+'<w:tcMar><w:top w:w="25" w:type="dxa"/><w:left w:w="45" w:type="dxa"/><w:bottom w:w="25" w:type="dxa"/><w:right w:w="45" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:value||'—',bold:first,size:15}],{align:'left'})+'</w:tc></w:tr>'; }
+  const sid=reportClean(info.structId||info.bid||''); let rows=''; rows+=row('Structure Number',sid,true); rows+=row('Building ID/Name:',info.bname||info.bid); rows+=row('Address',info.address); rows+=row('Building Location Coordinates:','Latitude: '+(info.lat||'—')+'    Longitude: '+(info.lng||'—')); rows+=row('Building Corner Coordinates '+sid,'P1: —    P2: —\nP3: —    P4: —'); rows+=row('Between Chainage','—'); const tbl='<w:tbl>'+pr+grid+rows+'</w:tbl>';
+  let img=''; if(opts.mapRelId){ const W=Math.round(14.5*360000),H=Math.round(9*360000); img='<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="60"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="'+W+'" cy="'+H+'"/><wp:docPr id="8001" name="LocationMap"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="LocationMap"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="'+opts.mapRelId+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+W+'" cy="'+H+'"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'; } else img=docxPara([{text:'[Map image not available - update location section before submission]',size:17,color:'777777'}],{align:'center'});
+  const mapLink=docxPara([{text:'Map link: https://maps.google.com/?q='+(info.lat||'')+','+(info.lng||''),size:17}],{align:'left'}); const zone=docxPara([{text:'Tunnel Alignment Centre Line / Zone of Influence @30m',bold:true,size:17}],{align:'left'});
+  return heading+'<w:p/>'+tbl+'<w:p/>'+img+mapLink+zone;
 }
 
 function buildExternalViewsPage(extSlots, extRelIds){
-  // ── EXTERNAL VIEWS page — 4 or 6 slots ──────────────────
-  const heading = docxPara([{text:'7. BUILDING\'S EXTERNAL VIEWS',bold:true,size:24,color:'1F3864'}]);
-
-  const tblBorders = '<w:tblBorders>'
-    + '<w:top w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:left w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:bottom w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:right w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:insideH w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '<w:insideV w:val="single" w:color="1F3864" w:sz="4"/>'
-    + '</w:tblBorders>';
-  const tblPr = '<w:tblPr><w:tblW w:w="10400" w:type="dxa"/>' + tblBorders + '</w:tblPr>';
-  const tblGrid = '<w:tblGrid><w:gridCol w:w="5200"/><w:gridCol w:w="5200"/></w:tblGrid>';
-
-  const filled = extSlots.filter((s,i) => s && (extRelIds[i]||{}).relId);
-  if(!filled.length){
-    return heading + '<w:p><w:pPr><w:spacing w:after="60"/></w:pPr><w:r><w:t>No external view photos captured.</w:t></w:r></w:p>';
-  }
-
-  // Process in pairs
-  let rows = '';
-  for(let i=0; i < extSlots.length; i+=2){
-    const lS = extSlots[i],   lR = extRelIds[i]||{};
-    const rS = extSlots[i+1], rR = extRelIds[i+1]||{};
-
-    // Caption row (direction label)
-    function captionCell(slot, width){
-      const label = slot ? xmlEscape(slot.dir || ('View ' + (i+1))) : '';
-      return '<w:tc><w:tcPr><w:tcW w:w="' + width + '" w:type="dxa"/>'
-        + '<w:shd w:fill="D9E2F3" w:val="clear"/>'
-        + '<w:tcMar><w:top w:type="dxa" w:w="60"/><w:left w:type="dxa" w:w="100"/><w:bottom w:type="dxa" w:w="60"/><w:right w:type="dxa" w:w="100"/></w:tcMar>'
-        + '<w:vAlign w:val="center"/></w:tcPr>'
-        + '<w:p><w:pPr><w:spacing w:after="0"/><w:jc w:val="center"/></w:pPr>'
-        + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:bCs/><w:color w:val="1F3864"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
-        + '<w:t>' + label + ' Elevation</w:t></w:r></w:p></w:tc>';
-    }
-
-    rows += '<w:tr><w:trPr><w:trHeight w:val="340" w:hRule="atLeast"/></w:trPr>'
-      + captionCell(lS, 5200)
-      + captionCell(rS, 5200)
-      + '</w:tr>';
-
-    // Photo row
-    function photoCell(slot, relData, width){
-      if(slot && relData && relData.relId){
-        const picNum = relData.picNum;
-        const W = Math.round(7.33 * 360000);  // 7.33cm wide for ext view
-        const H = Math.round(5.5 * 360000);   // 5.5cm high
-        const picXml = '<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
-          + '<wp:extent cx="' + W + '" cy="' + H + '"/>'
-          + '<wp:effectExtent t="0" r="0" b="0" l="0"/>'
-          + '<wp:docPr id="' + picNum + '" name="ext_photo" descr="external view"/>'
-          + '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>'
-          + '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
-          + '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-          + '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-          + '<pic:nvPicPr><pic:cNvPr id="0" name="" descr=""/><pic:cNvPicPr><a:picLocks noChangeAspect="1" noChangeArrowheads="1"/></pic:cNvPicPr></pic:nvPicPr>'
-          + '<pic:blipFill><a:blip r:embed="' + relData.relId + '" cstate="none"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
-          + '<pic:spPr bwMode="auto"><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + W + '" cy="' + H + '"/></a:xfrm>'
-          + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
-          + '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>';
-        return '<w:tc><w:tcPr><w:tcW w:w="' + width + '" w:type="dxa"/>'
-          + '<w:tcMar><w:top w:type="dxa" w:w="80"/><w:left w:type="dxa" w:w="80"/><w:bottom w:type="dxa" w:w="80"/><w:right w:type="dxa" w:w="80"/></w:tcMar>'
-          + '<w:vAlign w:val="center"/></w:tcPr>'
-          + '<w:p><w:pPr><w:spacing w:after="0"/><w:jc w:val="center"/></w:pPr>'
-          + '<w:r><w:rPr/>' + picXml + '</w:r></w:p></w:tc>';
-      } else {
-        return '<w:tc><w:tcPr><w:tcW w:w="' + width + '" w:type="dxa"/>'
-          + '<w:shd w:fill="F2F2F2" w:val="clear"/></w:tcPr>'
-          + '<w:p><w:pPr><w:spacing w:after="0"/><w:jc w:val="center"/></w:pPr>'
-          + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="18"/></w:rPr>'
-          + '<w:t>No Photo</w:t></w:r></w:p></w:tc>';
-      }
-    }
-    rows += '<w:tr><w:trPr><w:trHeight w:val="3118" w:hRule="exact"/></w:trPr>'
-      + photoCell(lS, lR, 5200)
-      + photoCell(rS, rR, 5200)
-      + '</w:tr>';
-
-    // Photograph ID row
-    function pidCell(slot, width){
-      const txt = slot ? xmlEscape('Photograph: ' + slot.dir) : '';
-      return '<w:tc><w:tcPr><w:tcW w:w="' + width + '" w:type="dxa"/>'
-        + '<w:tcMar><w:top w:type="dxa" w:w="60"/><w:left w:type="dxa" w:w="100"/><w:bottom w:type="dxa" w:w="60"/><w:right w:type="dxa" w:w="100"/></w:tcMar>'
-        + '<w:vAlign w:val="center"/></w:tcPr>'
-        + '<w:p><w:pPr><w:spacing w:after="0"/><w:jc w:val="center"/></w:pPr>'
-        + '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:bCs/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr>'
-        + '<w:t>' + txt + '</w:t></w:r></w:p></w:tc>';
-    }
-    rows += '<w:tr><w:trPr><w:trHeight w:val="300" w:hRule="atLeast"/></w:trPr>'
-      + pidCell(lS, 5200) + pidCell(rS, 5200) + '</w:tr>';
-  }
-
-  const tbl = '<w:tbl>' + tblPr + tblGrid + rows + '</w:tbl>';
-  return heading
-    + '<w:p><w:pPr><w:spacing w:after="60"/></w:pPr></w:p>'
-    + tbl;
+  const heading=docxPara([{text:'9. Building\'s External Views',bold:true,size:24,color:'1F3864'}]);
+  const bd='<w:tblBorders><w:top w:val="single" w:color="1F3864" w:sz="4"/><w:left w:val="single" w:color="1F3864" w:sz="4"/><w:bottom w:val="single" w:color="1F3864" w:sz="4"/><w:right w:val="single" w:color="1F3864" w:sz="4"/><w:insideH w:val="single" w:color="1F3864" w:sz="4"/><w:insideV w:val="single" w:color="1F3864" w:sz="4"/></w:tblBorders>';
+  const pr='<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'+bd+'<w:tblLayout w:type="autofit"/></w:tblPr>'; const grid='<w:tblGrid><w:gridCol w:w="5200"/><w:gridCol w:w="5200"/></w:tblGrid>'; let rows='';
+  for(let i=0;i<extSlots.length;i+=2){ const pair=[[extSlots[i],extRelIds[i]||{}],[extSlots[i+1],extRelIds[i+1]||{}]];
+    const cap=pair.map(([slot])=>'<w:tc><w:tcPr><w:shd w:fill="D9E2F3"/><w:tcMar><w:top w:w="45" w:type="dxa"/><w:left w:w="70" w:type="dxa"/><w:bottom w:w="45" w:type="dxa"/><w:right w:w="70" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:slot?(slot.dir+' Elevation'):'',bold:true,size:17,color:'1F3864'}],{align:'center'})+'</w:tc>').join(''); rows+='<w:tr><w:trPr><w:trHeight w:val="260" w:hRule="atLeast"/></w:trPr>'+cap+'</w:tr>';
+    const photos=pair.map(([slot,r])=>{ if(!(slot&&r.relId)) return '<w:tc><w:tcPr><w:tcMar><w:top w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/></w:tcMar><w:shd w:fill="F2F2F2"/></w:tcPr>'+docxPara([{text:'No Photo',size:17}],{align:'center'})+'</w:tc>'; const W=Math.round(7.33*360000),H=Math.round(5.5*360000); const pic='<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="'+W+'" cy="'+H+'"/><wp:docPr id="'+r.picNum+'" name="ext_photo"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name=""/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="'+r.relId+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+W+'" cy="'+H+'"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>'; return '<w:tc><w:tcPr><w:tcMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tcMar><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="0"/><w:jc w:val="center"/></w:pPr><w:r>'+pic+'</w:r></w:p></w:tc>'; }).join(''); rows+='<w:tr><w:trPr><w:trHeight w:val="3118" w:hRule="exact"/></w:trPr>'+photos+'</w:tr>';
+    const ids=pair.map(([slot])=>'<w:tc><w:tcPr><w:tcMar><w:top w:w="35" w:type="dxa"/><w:bottom w:w="35" w:type="dxa"/></w:tcMar></w:tcPr>'+docxPara([{text:slot?('Photograph: '+slot.dir):'',bold:true,size:15}],{align:'center'})+'</w:tc>').join(''); rows+='<w:tr><w:trPr><w:trHeight w:val="220" w:hRule="atLeast"/></w:trPr>'+ids+'</w:tr>'; }
+  return heading+'<w:p/>'+'<w:tbl>'+pr+grid+rows+'</w:tbl>';
 }
 
 function buildDocxPage(pageEntries, building, photoRelIds){
-  // compact cell for text rows — tight margins so rows stay < 0.4cm
-  function cCell(content, width, gridSpan, shade){
-    const gs = gridSpan ? '<w:gridSpan w:val="' + gridSpan + '"/>' : '';
-    const sh = shade ? '<w:shd w:fill="' + shade + '" w:val="clear"/>' : '';
-    const margins = '<w:tcMar><w:top w:type="dxa" w:w="40"/><w:left w:type="dxa" w:w="80"/><w:bottom w:type="dxa" w:w="40"/><w:right w:type="dxa" w:w="80"/></w:tcMar>';
-    return '<w:tc><w:tcPr><w:tcW w:type="dxa" w:w="' + width + '"/>' + gs + sh + margins + '<w:vAlign w:val="center"/></w:tcPr>' + content + '</w:tc>';
-  }
-  function cPara(runs, opts){
-    const pPr = '<w:pPr><w:spacing w:after="0" w:before="0"/></w:pPr>';
-    let rXml = '';
-    for(const r of runs){
-      const bold = r.bold ? '<w:b/><w:bCs/>' : '';
-      const color = r.color ? '<w:color w:val="' + r.color + '"/>' : '';
-      const rPr = '<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + bold + color + '<w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr>';
-      rXml += '<w:r>' + rPr + '<w:t xml:space="preserve">' + xmlEscape(r.text) + '</w:t></w:r>';
-    }
-    return '<w:p>' + pPr + rXml + '</w:p>';
-  }
-  // Derive best location string from entries on this page
-  const locs = [...new Set(pageEntries.filter(Boolean).map(e=>e.location))];
-  const pageLocation = locs.join(', ') || building.location || '';
-  // Find max damage degree on this page for header
-  const degrees = pageEntries.filter(Boolean).map(e=>{
-    if(!isDefect(e.condition)) return '';
-    const m = e.condition.match(/- (Negligible|Very Slight|Slight|Moderate|Severe|Very Severe)/i);
-    return m ? m[1] : (isDefect(e.condition) ? 'Defect' : '');
-  }).filter(Boolean);
-  const damagedLevel = degrees.length ? [...new Set(degrees)].join(' / ') : 'N/A';
-
-  const headerRow1 = '<w:tr><w:trPr><w:trHeight w:val="160" w:hRule="atLeast"/></w:trPr>'
-    + cCell(cPara([{text:'Damage No.: ',bold:true},{text:'N/A'}]), 5200, 2, 'D9E2F3')
-    + cCell(cPara([{text:'Location: ',bold:true},{text:pageLocation}]), 5200, 2, 'D9E2F3')
-    + '</w:tr>';
-  const headerRow2 = '<w:tr><w:trPr><w:trHeight w:val="160" w:hRule="atLeast"/></w:trPr>'
-    + cCell(cPara([{text:'Area.: ',bold:true},{text:'Exterior'}],{shade:'D9E2F3'}), 5200, 2)
-    + cCell(cPara([{text:'Damaged Level: ',bold:true},{text:damagedLevel}],{shade:'D9E2F3'}), 5200, 2)
-    + '</w:tr>';
-
-  let bodyRows = '';
-  for(let block=0;block<3;block++){
-    const li=block*2, ri=block*2+1;
-    const lE=pageEntries[li], rE=pageEntries[ri];
-    const lR=photoRelIds[li], rR=photoRelIds[ri];
-    const leftPh = lE && lR && lR.relId
-      ? docxCell(docxPicParagraph(lR.relId,lR.picNum,lR.hasDefect),{width:5200,gridSpan:2})
-      : docxCell(docxPara([{text:lE?('[PHOTO '+lE.photoId+']'):'',size:20}],{align:'center'}),{width:5200,gridSpan:2,shading:'F2F2F2'});
-    const rightPh = rE && rR && rR.relId
-      ? docxCell(docxPicParagraph(rR.relId,rR.picNum,rR.hasDefect),{width:5200,gridSpan:2})
-      : docxCell(docxPara([{text:rE?('[PHOTO '+rE.photoId+']'):'',size:20}],{align:'center'}),{width:5200,gridSpan:2,shading:'F2F2F2'});
-    bodyRows += '<w:tr><w:trPr><w:trHeight w:val="3690" w:hRule="exact"/></w:trPr>' + leftPh + rightPh + '</w:tr>';
-    bodyRows += '<w:tr><w:trPr><w:trHeight w:val="140" w:hRule="atLeast"/></w:trPr>'
-      + cCell(cPara([{text:'Specific Location: ',bold:true},{text:lE?lE.description:''}]), 2600)
-      + cCell(cPara([{text:'View Direction: ',bold:true},{text:lE?lE.location:''}]), 2600)
-      + cCell(cPara([{text:'Specific Location: ',bold:true},{text:rE?rE.description:''}]), 2600)
-      + cCell(cPara([{text:'View Direction: ',bold:true},{text:rE?rE.location:''}]), 2600)
-      + '</w:tr>';
-    const lCond = lE?(isDefect(lE.condition)?lE.condition:'N/A'):'';
-    const rCond = rE?(isDefect(rE.condition)?rE.condition:'N/A'):'';
-    bodyRows += '<w:tr><w:trPr><w:trHeight w:val="140" w:hRule="atLeast"/></w:trPr>'
-      + cCell(cPara([{text:'Defect Type: ',bold:true},{text:lCond,bold:lE&&isDefect(lE.condition),color:lE&&isDefect(lE.condition)?'C00000':null}]), 2600)
-      + cCell(cPara([{text:'Picture ID: ',bold:true},{text:lE?pad3(lE.photoId):'',bold:true}]), 2600)
-      + cCell(cPara([{text:'Defect Type: ',bold:true},{text:rCond,bold:rE&&isDefect(rE.condition),color:rE&&isDefect(rE.condition)?'C00000':null}]), 2600)
-      + cCell(cPara([{text:'Picture ID: ',bold:true},{text:rE?pad3(rE.photoId):'',bold:true}]), 2600)
-      + '</w:tr>';
-  }
-  const tblPr = '<w:tblPr><w:tblW w:type="dxa" w:w="10400"/><w:tblBorders><w:top w:val="single" w:color="1F3864" w:sz="4"/><w:left w:val="single" w:color="1F3864" w:sz="4"/><w:bottom w:val="single" w:color="1F3864" w:sz="4"/><w:right w:val="single" w:color="1F3864" w:sz="4"/><w:insideH w:val="single" w:color="1F3864" w:sz="4"/><w:insideV w:val="single" w:color="1F3864" w:sz="4"/></w:tblBorders></w:tblPr>';
-  const tblGrid = '<w:tblGrid><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/></w:tblGrid>';
-  return '<w:tbl>' + tblPr + tblGrid + headerRow1 + headerRow2 + bodyRows + '</w:tbl>';
+  const prepared=prepareSubmissionEntriesV33(pageEntries||[]);
+  function cCell(content,width,gridSpan,shade){ const gs=gridSpan?'<w:gridSpan w:val="'+gridSpan+'"/>':''; const sh=shade?'<w:shd w:fill="'+shade+'"/>':''; return '<w:tc><w:tcPr><w:tcW w:w="'+width+'" w:type="dxa"/>'+gs+sh+'<w:tcMar><w:top w:w="40" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tcMar><w:vAlign w:val="center"/></w:tcPr>'+content+'</w:tc>'; }
+  function cPara(runs){ let x=''; for(const r of runs){ const b=r.bold?'<w:b/><w:bCs/>':''; const col=r.color?'<w:color w:val="'+r.color+'"/>':''; x+='<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>'+b+col+'<w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:t xml:space="preserve">'+xmlEscape(r.text||'')+'</w:t></w:r>'; } return '<w:p><w:pPr><w:spacing w:after="0" w:before="0"/></w:pPr>'+x+'</w:p>'; }
+  const locs=[...new Set(prepared.filter(Boolean).map(e=>e.location).filter(Boolean))]; const pageLocation=locs.join(', ')||building.location||''; const pageD=prepared.filter(e=>e._damageNo).map(e=>e._damageNo); const dmgText=pageD.length?pageD.join(' & '):'N/A'; const degrees=prepared.filter(e=>isDefect(e.condition)).map(e=>{ const m=String(e.condition||'').match(/- (Negligible|Very Slight|Slight|Moderate|Severe|Very Severe)/i); return m?m[1]:'Defect'; }); const damagedLevel=degrees.length?[...new Set(degrees)].join(' / '):'N/A';
+  const h1='<w:tr><w:trPr><w:trHeight w:val="160" w:hRule="atLeast"/></w:trPr>'+cCell(cPara([{text:'Damage No.: ',bold:true},{text:dmgText}]),5200,2,'D9E2F3')+cCell(cPara([{text:'Location: ',bold:true},{text:pageLocation}]),5200,2,'D9E2F3')+'</w:tr>';
+  const h2='<w:tr><w:trPr><w:trHeight w:val="160" w:hRule="atLeast"/></w:trPr>'+cCell(cPara([{text:'Area.: ',bold:true},{text:'Exterior'}]),5200,2)+cCell(cPara([{text:'Damaged Level: ',bold:true},{text:damagedLevel}]),5200,2)+'</w:tr>';
+  let body=''; for(let block=0;block<3;block++){ const li=block*2,ri=li+1,lE=prepared[li],rE=prepared[ri],lR=photoRelIds[li],rR=photoRelIds[ri]; const lPh=lE&&lR&&lR.relId?docxCell(docxPicParagraph(lR.relId,lR.picNum,lR.hasDefect),{width:5200,gridSpan:2}):docxCell(docxPara([{text:lE?('[PHOTO '+lE.photoId+']'):'',size:20}],{align:'center'}),{width:5200,gridSpan:2,shading:'F2F2F2'}); const rPh=rE&&rR&&rR.relId?docxCell(docxPicParagraph(rR.relId,rR.picNum,rR.hasDefect),{width:5200,gridSpan:2}):docxCell(docxPara([{text:rE?('[PHOTO '+rE.photoId+']'):'',size:20}],{align:'center'}),{width:5200,gridSpan:2,shading:'F2F2F2'}); body+='<w:tr><w:trPr><w:trHeight w:val="3690" w:hRule="exact"/></w:trPr>'+lPh+rPh+'</w:tr>';
+    body+='<w:tr><w:trPr><w:trHeight w:val="140" w:hRule="atLeast"/></w:trPr>'+cCell(cPara([{text:'Specific Location: ',bold:true},{text:lE?lE._specificLocation:''}]),2600)+cCell(cPara([{text:'View Direction: ',bold:true},{text:lE?lE.location:''}]),2600)+cCell(cPara([{text:'Specific Location: ',bold:true},{text:rE?rE._specificLocation:''}]),2600)+cCell(cPara([{text:'View Direction: ',bold:true},{text:rE?rE.location:''}]),2600)+'</w:tr>';
+    function cond(e){ if(!e) return ''; const base=isDefect(e.condition)?reportClean(e.condition):'N/A'; return e._damageNo&&base!=='N/A' ? base+' '+e._damageNo : base; }
+    const lc=cond(lE),rc=cond(rE); body+='<w:tr><w:trPr><w:trHeight w:val="140" w:hRule="atLeast"/></w:trPr>'+cCell(cPara([{text:'Defect Type: ',bold:true},{text:lc,bold:lE&&isDefect(lE.condition),color:lE&&isDefect(lE.condition)?'FF0000':null}]),2600)+cCell(cPara([{text:'Picture ID: ',bold:true},{text:lE?pad3(lE.photoId):'',bold:true}]),2600)+cCell(cPara([{text:'Defect Type: ',bold:true},{text:rc,bold:rE&&isDefect(rE.condition),color:rE&&isDefect(rE.condition)?'FF0000':null}]),2600)+cCell(cPara([{text:'Picture ID: ',bold:true},{text:rE?pad3(rE.photoId):'',bold:true}]),2600)+'</w:tr>'; }
+  const pr='<w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="autofit"/><w:tblBorders><w:top w:val="single" w:color="1F3864" w:sz="4"/><w:left w:val="single" w:color="1F3864" w:sz="4"/><w:bottom w:val="single" w:color="1F3864" w:sz="4"/><w:right w:val="single" w:color="1F3864" w:sz="4"/><w:insideH w:val="single" w:color="1F3864" w:sz="4"/><w:insideV w:val="single" w:color="1F3864" w:sz="4"/></w:tblBorders></w:tblPr>'; const grid='<w:tblGrid><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/><w:gridCol w:w="2600"/></w:tblGrid>'; return '<w:tbl>'+pr+grid+h1+h2+body+'</w:tbl>';
 }
 
 
@@ -4199,7 +3861,7 @@ async function buildWordForBuilding(buildingId, progressCb){
   zip.file('docProps/core.xml',`<?xml version="1.0" encoding="utf-8"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
 <dc:title>PCS Survey - ${xmlEscape(b.name)}</dc:title>
-<dc:creator>PCS Survey App</dc:creator>
+<dc:creator>PCS Survey App - HSR Final Report v3.3</dc:creator>
 </cp:coreProperties>`);
   zip.file('docProps/app.xml',`<?xml version="1.0" encoding="utf-8"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
@@ -4503,19 +4165,20 @@ async function buildWordForBuilding(buildingId, progressCb){
   const locPage = buildLocationPage(info, mapOpts);
 
   // ── Page 4+: Photo & Defect pages (6 per page) ──────────
+  const preparedForReport = prepareSubmissionEntriesV33(ents);
   const photoPages = [];
-  for(let i=0;i<ents.length;i+=6) photoPages.push(buildDocxPage(ents.slice(i,i+6),b,rels.slice(i,i+6)));
+  for(let i=0;i<preparedForReport.length;i+=6) photoPages.push(buildDocxPage(preparedForReport.slice(i,i+6),b,rels.slice(i,i+6)));
 
-  const extPage = (S.extSlots.some(s=>s&&s.photoBlob))
-    ? buildExternalViewsPage(S.extSlots, extRelIds)
-    : null;
+  const extPage = buildExternalViewsPage(S.extSlots, extRelIds);
 
   // ── Assemble all pages ───────────────────────────────────
   // ── Page order: Info → References → Location → External Views → Photos ──
-  const allPages = [coverPage, docControlPage, tocPage, infoPage, refsPage, locPage];
-  if(extPage) allPages.push(extPage);   // Page 4: External Views (before photos)
-  if(photoPages.length) photoPages.forEach(p=>allPages.push(p));  // Page 5+: Photos
+  const allPages = [coverPage, docControlPage, tocPage, infoPage, refsPage, locPage, extPage];
+  const photoHeading = docxPara([{text:'10. Photographs And Defects Details of Building',bold:true,size:24,color:'1F3864'}]);
+  allPages.push(photoHeading);
+  if(photoPages.length) photoPages.forEach(p=>allPages.push(p));
   else allPages.push('<w:p><w:r><w:t>No photo entries captured.</w:t></w:r></w:p>');
+  allPages.push(docxPara([{text:'11. NOC Details',bold:true,size:24,color:'1F3864'}]));
 
   const bodyContent = allPages.join(pageBreak);
 
